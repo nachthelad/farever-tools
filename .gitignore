@@ -5,6 +5,8 @@
 # .NET
 **/bin/
 **/obj/
+.dotnet-home/
+.nuget-packages/
 /.vs/
 *.user
 
@@ -18,4 +20,3 @@
 *.local.json
 *.log
 *.dmp
-

@@ -1,0 +1,18 @@
+<Application x:Class="FareverTranslate.Host.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+  <Application.Resources>
+    <SolidColorBrush x:Key="PanelBrush" Color="#E9191D26" />
+    <SolidColorBrush x:Key="CardBrush" Color="#E82A303C" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF60A5FA" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#FFADB6C6" />
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="#FF334155" />
+      <Setter Property="BorderBrush" Value="#FF475569" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+  </Application.Resources>
+</Application>

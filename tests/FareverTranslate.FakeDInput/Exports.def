@@ -1,0 +1,7 @@
+LIBRARY "farever-minimap"
+EXPORTS
+    DirectInput8Create PRIVATE
+    DllCanUnloadNow PRIVATE
+    DllGetClassObject PRIVATE
+    DllRegisterServer PRIVATE
+    DllUnregisterServer PRIVATE
