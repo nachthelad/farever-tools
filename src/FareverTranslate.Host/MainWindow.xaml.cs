@@ -5,7 +5,6 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Threading;
 using FareverTranslate.Core.Configuration;
 using FareverTranslate.Core.Diagnostics;
@@ -27,14 +26,15 @@ public partial class MainWindow : Window
     private readonly AppLogger logger;
     private readonly GameWindowTracker gameWindow;
     private readonly DispatcherTimer timer;
+    private readonly ForegroundKeyToggle panelToggle = new();
     private readonly Dictionary<string, MessageRowViewModel> knownRows = new();
     private AppSettings settings;
-    private HwndSource? source;
     private bool calibrationMode;
-    private bool hotKeyRegistered;
     private bool followingGame = true;
     private bool readerInitializationStarted;
     private bool readerInitializationComplete;
+    private bool readerSampleRunning;
+    private bool closing;
     private bool initialCalibrationPending;
     private IntPtr gameWindowHandle;
 
@@ -79,20 +79,6 @@ public partial class MainWindow : Window
     private void Window_SourceInitialized(object? sender, EventArgs e)
     {
         NativeWindow.SetNoActivate(this, enabled: true);
-        source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
-        source?.AddHook(WindowProcedure);
-        if (source is not null)
-        {
-            hotKeyRegistered = NativeWindow.RegisterHotKey(
-                source.Handle,
-                NativeWindow.HotKeyToggle,
-                NativeWindow.ModControl | NativeWindow.ModShift,
-                (uint)KeyInterop.VirtualKeyFromKey(Key.T));
-        }
-        if (!hotKeyRegistered)
-        {
-            logger.Warn("global_hotkey_unavailable");
-        }
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -112,14 +98,50 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (readerInitializationComplete)
+        bool gameIsForeground = gameWindow.IsForeground;
+        if (panelToggle.Update(
+                NativeWindow.IsF6Down(),
+                gameIsForeground))
+        {
+            SetPanelVisible(!settings.PanelVisible);
+        }
+
+        UpdateGamePosition();
+        if (readerInitializationComplete && !readerSampleRunning)
+        {
+            _ = SampleReaderAsync();
+        }
+    }
+
+    private async Task SampleReaderAsync()
+    {
+        readerSampleRunning = true;
+        try
         {
             IReadOnlyList<ChatMessageSnapshot> snapshots =
-                reader.ReadRecent(settings.MaximumMessages);
+                await Task.Run(
+                    () => reader.ReadRecent(settings.MaximumMessages));
+            if (closing)
+            {
+                return;
+            }
             ReaderState.Text = reader.Diagnostic;
             ReconcileMessages(snapshots);
+            UpdateGamePosition();
         }
-        UpdateGamePosition();
+        catch (Exception exception) when (
+            exception is InvalidOperationException
+            or ObjectDisposedException)
+        {
+            if (!closing)
+            {
+                logger.Error("reader_sample_failed", exception);
+            }
+        }
+        finally
+        {
+            readerSampleRunning = false;
+        }
     }
 
     private void UpdateGamePosition()
@@ -410,24 +432,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private IntPtr WindowProcedure(
-        IntPtr window,
-        int message,
-        IntPtr wordParameter,
-        IntPtr longParameter,
-        ref bool handled)
-    {
-        if (message == NativeWindow.WmHotKey
-            && wordParameter.ToInt32() == NativeWindow.HotKeyToggle)
-        {
-            SetPanelVisible(!settings.PanelVisible);
-            handled = true;
-        }
-        return IntPtr.Zero;
-    }
-
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        closing = true;
         timer.Stop();
         settings = settings with
         {
@@ -435,19 +442,9 @@ public partial class MainWindow : Window
             PanelHeight = ActualHeight,
         };
         settingsStore.Save(settings);
-        if (readerInitializationComplete)
+        if (readerInitializationComplete && !readerSampleRunning)
         {
             reader.Dispose();
-        }
-        if (source is not null)
-        {
-            if (hotKeyRegistered)
-            {
-                NativeWindow.UnregisterHotKey(
-                    source.Handle,
-                    NativeWindow.HotKeyToggle);
-            }
-            source.RemoveHook(WindowProcedure);
         }
     }
 }

@@ -31,10 +31,14 @@ public sealed class HashLinkChatReader : IDisposable
         ["channel", "channelId", "type"];
     private static readonly string[] ContainerFields =
         ["array", "content", "items", "data", "values"];
+    private static readonly TimeSpan MissingObjectRetryDelay =
+        TimeSpan.FromSeconds(2);
 
     private readonly int processId;
     private readonly string gameDirectory;
     private readonly AppLogger logger;
+    private readonly Func<DateTimeOffset> utcNow;
+    private readonly ChatRecoveryWatchdog recoveryWatchdog = new();
     private IProcessMemory? memory;
     private HashLinkMetadataResolver? resolver;
     private ResolvedHashLinkType? playerType;
@@ -42,6 +46,7 @@ public sealed class HashLinkChatReader : IDisposable
     private long localPlayer;
     private long chatClient;
     private string localPlayerName = string.Empty;
+    private DateTimeOffset nextObjectSearch;
 
     public HashLinkChatReader(
         int processId,
@@ -51,16 +56,19 @@ public sealed class HashLinkChatReader : IDisposable
         this.processId = processId;
         this.gameDirectory = gameDirectory;
         this.logger = logger;
+        utcNow = () => DateTimeOffset.UtcNow;
     }
 
     internal HashLinkChatReader(
         IProcessMemory memory,
-        AppLogger logger)
+        AppLogger logger,
+        Func<DateTimeOffset>? utcNow = null)
     {
         processId = 0;
         gameDirectory = string.Empty;
         this.logger = logger;
         this.memory = memory;
+        this.utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
     }
 
     public ChatReaderStatus Status { get; private set; } = ChatReaderStatus.Starting;
@@ -131,8 +139,10 @@ public sealed class HashLinkChatReader : IDisposable
 
         try
         {
-            if (!ValidateObjects() && !LocateObjects())
+            DateTimeOffset now = utcNow();
+            if (!EnsureObjects(now))
             {
+                ApplyRecovery(now, recognizedMessage: false);
                 return Array.Empty<ChatMessageSnapshot>();
             }
 
@@ -144,6 +154,7 @@ public sealed class HashLinkChatReader : IDisposable
             {
                 Status = ChatReaderStatus.ChatNotReady;
                 Diagnostic = "El chat todavía no está disponible";
+                ApplyRecovery(now, recognizedMessage: false);
                 return Array.Empty<ChatMessageSnapshot>();
             }
 
@@ -155,25 +166,30 @@ public sealed class HashLinkChatReader : IDisposable
             {
                 Status = ChatReaderStatus.Ready;
                 Diagnostic = "Chat conectado";
+                ApplyRecovery(now, recognizedMessage: false);
                 return Array.Empty<ChatMessageSnapshot>();
             }
 
             var messages = new List<ChatMessageSnapshot>();
+            bool recognizedMessage = false;
             for (int index = Math.Max(0, entries.Count - maximumMessages * 3);
                  index < entries.Count;
                  index++)
             {
                 if (TryReadMessage(entries[index], out ChatMessageSnapshot? message)
-                    && message is not null
-                    && !message.IsSelf
-                    && !message.IsSystem)
+                    && message is not null)
                 {
-                    messages.Add(message);
+                    recognizedMessage = true;
+                    if (!message.IsSelf && !message.IsSystem)
+                    {
+                        messages.Add(message);
+                    }
                 }
             }
 
             Status = ChatReaderStatus.Ready;
             Diagnostic = "Chat conectado";
+            ApplyRecovery(now, recognizedMessage);
             return messages
                 .DistinctBy(message => message.Identity)
                 .TakeLast(maximumMessages)
@@ -188,7 +204,7 @@ public sealed class HashLinkChatReader : IDisposable
             localPlayer = 0;
             chatClient = 0;
             Status = ChatReaderStatus.ChatNotReady;
-            Diagnostic = "Relocalizando el chat";
+            Diagnostic = "Reconectando lector del chat…";
             return Array.Empty<ChatMessageSnapshot>();
         }
     }
@@ -356,6 +372,103 @@ public sealed class HashLinkChatReader : IDisposable
         Diagnostic = "Chat conectado";
         logger.Info("chat_objects_located");
         return true;
+    }
+
+    private bool EnsureObjects(DateTimeOffset now)
+    {
+        if (ValidateObjects())
+        {
+            return true;
+        }
+        if (RefreshKnownReferences(logResult: true))
+        {
+            return true;
+        }
+        return RelocateObjects(now, forcedByWatchdog: false);
+    }
+
+    private bool RefreshKnownReferences(bool logResult)
+    {
+        if (memory is null
+            || playerType is null
+            || chatClientType is null
+            || localPlayer == 0
+            || !memory.TryReadPointer(
+                localPlayer,
+                out long currentPlayerType)
+            || currentPlayerType != playerType.TypeAddress
+            || !memory.TryReadByte(
+                localPlayer + playerType.Fields["isMe"].Offset,
+                out byte isMe)
+            || isMe == 0
+            || !memory.TryReadPointer(
+                localPlayer + playerType.Fields["chatClient"].Offset,
+                out long currentChat)
+            || currentChat == 0
+            || !memory.TryReadPointer(
+                currentChat,
+                out long currentChatType)
+            || currentChatType != chatClientType.TypeAddress)
+        {
+            return false;
+        }
+
+        bool changed = currentChat != chatClient;
+        chatClient = currentChat;
+        Status = ChatReaderStatus.Ready;
+        Diagnostic = "Chat conectado";
+        if (logResult)
+        {
+            logger.Info(
+                changed
+                    ? "chat_references_reconnected"
+                    : "chat_references_refreshed");
+        }
+        return true;
+    }
+
+    private bool RelocateObjects(
+        DateTimeOffset now,
+        bool forcedByWatchdog)
+    {
+        if (!forcedByWatchdog && now < nextObjectSearch)
+        {
+            Status = ChatReaderStatus.PlayerNotFound;
+            Diagnostic = "Reconectando lector del chat…";
+            return false;
+        }
+
+        nextObjectSearch = now + MissingObjectRetryDelay;
+        localPlayer = 0;
+        chatClient = 0;
+        localPlayerName = string.Empty;
+        bool located = LocateObjects();
+        if (located)
+        {
+            nextObjectSearch = default;
+        }
+        return located;
+    }
+
+    private void ApplyRecovery(
+        DateTimeOffset now,
+        bool recognizedMessage)
+    {
+        ChatRecoveryAction action = recoveryWatchdog.Observe(
+            now,
+            recognizedMessage);
+        switch (action)
+        {
+            case ChatRecoveryAction.RefreshReferences:
+                logger.Info("chat_watchdog_refresh");
+                RefreshKnownReferences(logResult: false);
+                break;
+            case ChatRecoveryAction.RelocateObjects:
+                logger.Info("chat_watchdog_relocate");
+                Diagnostic = "Reconectando lector del chat…";
+                RelocateObjects(now, forcedByWatchdog: true);
+                break;
+        }
     }
 
     private bool ValidateObjects()

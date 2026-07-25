@@ -9,10 +9,7 @@ internal static class NativeWindow
     internal const int GwlHwndParent = -8;
     internal const long WsExNoActivate = 0x08000000L;
     internal const long WsExToolWindow = 0x00000080L;
-    internal const int WmHotKey = 0x0312;
-    internal const uint ModControl = 0x0002;
-    internal const uint ModShift = 0x0004;
-    internal const int HotKeyToggle = 0x4654;
+    private const int VirtualKeyF6 = 0x75;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
@@ -52,6 +49,9 @@ internal static class NativeWindow
     [DllImport("user32.dll")]
     internal static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     internal static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
 
@@ -72,19 +72,8 @@ internal static class NativeWindow
         int height,
         uint flags);
 
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool RegisterHotKey(
-        IntPtr window,
-        int identifier,
-        uint modifiers,
-        uint key);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool UnregisterHotKey(
-        IntPtr window,
-        int identifier);
+    internal static bool IsF6Down() =>
+        (GetAsyncKeyState(VirtualKeyF6) & 0x8000) != 0;
 
     internal static void SetNoActivate(
         System.Windows.Window window,

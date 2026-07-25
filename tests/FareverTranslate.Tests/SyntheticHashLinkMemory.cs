@@ -341,6 +341,7 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
         Func<long, bool> predicate,
         out long address)
     {
+        PointerSearches++;
         for (int offset = 0;
              offset + sizeof(long) <= cursor;
              offset += sizeof(long))
@@ -359,6 +360,8 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
         address = 0;
         return false;
     }
+
+    internal int PointerSearches { get; private set; }
 
     public void Dispose()
     {

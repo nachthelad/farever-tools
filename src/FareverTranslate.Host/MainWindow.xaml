@@ -62,7 +62,7 @@
                 Content="×"
                 FontSize="17"
                 Margin="6,0,0,0"
-                ToolTip="Ocultar (Ctrl+Shift+T)"
+                ToolTip="Ocultar (F6)"
                 Click="Hide_Click" />
       </Grid>
       <TextBlock x:Name="CalibrationHint"
@@ -128,7 +128,7 @@
                  Margin="0,5,0,0"
                  Foreground="#FF7F8A9C"
                  FontSize="10"
-                 Text="Traducción manual · destino español · Ctrl+Shift+T" />
+                 Text="Traducción manual · destino español · F6" />
       <ResizeGrip Grid.Row="3"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Bottom"

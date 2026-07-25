@@ -20,6 +20,8 @@ if (args.Length == 3 && args[0] == "--proxy-case")
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("HashLink sintético", TestSyntheticHashLink),
+    ("Watchdog del chat", TestChatRecoveryWatchdog),
+    ("Toggle F6 por flanco y foco", TestForegroundKeyToggle),
     ("Build desconocido", TestUnsupportedBuild),
     ("Google success/autodetect", TestGoogleSuccess),
     ("Google errores y reintentos", TestGoogleErrors),
@@ -67,11 +69,15 @@ static Task TestSyntheticHashLink()
             "No preservó Unicode portugués.");
 
         fixture.ReconnectWith("Chegamos depois da mudança de zona.");
+        int searchesBeforeReconnect = fixture.Memory.PointerSearches;
         IReadOnlyList<ChatMessageSnapshot> afterReconnect = reader.ReadRecent(6);
         Assert(
             afterReconnect.Count == 1
             && afterReconnect[0].Text.Contains("mudança", StringComparison.Ordinal),
             "No siguió el cambio de chatClient.");
+        Assert(
+            fixture.Memory.PointerSearches == searchesBeforeReconnect,
+            "Una reconexión conocida provocó una búsqueda completa innecesaria.");
     }
     finally
     {
@@ -80,6 +86,80 @@ static Task TestSyntheticHashLink()
             Directory.Delete(logRoot, recursive: true);
         }
     }
+    return Task.CompletedTask;
+}
+
+static Task TestChatRecoveryWatchdog()
+{
+    var watchdog = new ChatRecoveryWatchdog();
+    DateTimeOffset start = new(2026, 7, 25, 12, 0, 0, TimeSpan.Zero);
+    Assert(
+        watchdog.Observe(start, recognizedMessage: false)
+            == ChatRecoveryAction.None,
+        "El watchdog actuó antes de iniciar la espera.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(5),
+            recognizedMessage: false)
+            == ChatRecoveryAction.RefreshReferences,
+        "No refrescó referencias a los cinco segundos.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(10),
+            recognizedMessage: false)
+            == ChatRecoveryAction.RefreshReferences,
+        "No repitió el refresh liviano.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(15),
+            recognizedMessage: false)
+            == ChatRecoveryAction.RelocateObjects,
+        "No relocalizó a los quince segundos.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(45),
+            recognizedMessage: false)
+            == ChatRecoveryAction.RelocateObjects,
+        "No aplicó el backoff de treinta segundos.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(105),
+            recognizedMessage: false)
+            == ChatRecoveryAction.RelocateObjects,
+        "No limitó el backoff a sesenta segundos.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(106),
+            recognizedMessage: true)
+            == ChatRecoveryAction.None,
+        "Un mensaje válido no reinició el watchdog.");
+    Assert(
+        watchdog.Observe(
+            start + TimeSpan.FromSeconds(110),
+            recognizedMessage: false)
+            == ChatRecoveryAction.None,
+        "El watchdog no reinició su ventana vacía.");
+    return Task.CompletedTask;
+}
+
+static Task TestForegroundKeyToggle()
+{
+    var toggle = new ForegroundKeyToggle();
+    Assert(
+        !toggle.Update(isDown: true, targetIsForeground: false),
+        "F6 actuó fuera de Farever.");
+    Assert(
+        !toggle.Update(isDown: true, targetIsForeground: true),
+        "Mantener F6 al cambiar de foco produjo un toggle.");
+    Assert(
+        !toggle.Update(isDown: false, targetIsForeground: true),
+        "Soltar F6 produjo un toggle.");
+    Assert(
+        toggle.Update(isDown: true, targetIsForeground: true),
+        "F6 no alternó con Farever al frente.");
+    Assert(
+        !toggle.Update(isDown: true, targetIsForeground: true),
+        "Mantener F6 alternó repetidamente.");
     return Task.CompletedTask;
 }
 
