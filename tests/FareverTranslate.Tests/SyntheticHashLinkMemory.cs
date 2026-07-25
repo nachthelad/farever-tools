@@ -80,10 +80,47 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
         return type;
     }
 
+    internal long VirtualType(
+        params (string Name, long Type)[] fields)
+    {
+        long fieldTable = Allocate(Math.Max(1, fields.Length) * 24);
+        for (int index = 0; index < fields.Length; index++)
+        {
+            WriteInt64(
+                fieldTable + index * 24L,
+                NativeString(fields[index].Name));
+            WriteInt64(
+                fieldTable + index * 24L + 8,
+                fields[index].Type);
+        }
+
+        long metadata = Allocate(32);
+        WriteInt64(metadata, fieldTable);
+        WriteInt32(metadata + 8, fields.Length);
+
+        long type = Allocate(16);
+        WriteInt32(type, (int)HashLinkTypeKind.Virtual);
+        WriteInt64(type + 8, metadata);
+        return type;
+    }
+
     internal long Object(long type, int size = 64)
     {
         long instance = Allocate(size);
         WriteInt64(instance, type);
+        return instance;
+    }
+
+    internal long Virtual(long type, params long[] pointerValues)
+    {
+        long instance = Allocate(24 + pointerValues.Length * 8);
+        WriteInt64(instance, type);
+        for (int index = 0; index < pointerValues.Length; index++)
+        {
+            long storage = Allocate(8);
+            WriteInt64(storage, pointerValues[index]);
+            WriteInt64(instance + 24 + index * 8L, storage);
+        }
         return instance;
     }
 
@@ -212,6 +249,15 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
         return true;
     }
 
+    public bool TryGetHashLinkTypeTable(
+        out long typesAddress,
+        out int typeCount)
+    {
+        typesAddress = 0;
+        typeCount = 0;
+        return false;
+    }
+
     public IReadOnlyList<long> FindPattern(
         byte[] pattern,
         bool writableOnly,
@@ -239,8 +285,11 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
         long pointer,
         bool writableOnly,
         int maximumResults) =>
-        FindPattern(BitConverter.GetBytes(pointer), writableOnly, maximumResults)
-            .Where(address => (address & 7) == 0)
+        FindPointerReferences(
+                new HashSet<long> { pointer },
+                writableOnly,
+                maximumResults)
+            .Select(reference => reference.Address)
             .ToArray();
 
     public IReadOnlyList<PointerReference> FindPointerReferences(
@@ -262,6 +311,53 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
             }
         }
         return results;
+    }
+
+    public IReadOnlyList<PointerReference> FindFirstPointerReferences(
+        IReadOnlySet<long> pointers,
+        bool writableOnly)
+    {
+        var remaining = pointers.ToHashSet();
+        var results = new List<PointerReference>();
+        for (int offset = 0;
+             offset + sizeof(long) <= cursor && remaining.Count > 0;
+             offset += sizeof(long))
+        {
+            long target = BitConverter.ToInt64(bytes, offset);
+            if (remaining.Remove(target))
+            {
+                results.Add(new PointerReference(
+                    target,
+                    BaseAddress + offset));
+            }
+        }
+        return results;
+    }
+
+    public bool TryFindPointer(
+        long pointer,
+        bool writableOnly,
+        bool largestRegionsFirst,
+        Func<long, bool> predicate,
+        out long address)
+    {
+        for (int offset = 0;
+             offset + sizeof(long) <= cursor;
+             offset += sizeof(long))
+        {
+            if (BitConverter.ToInt64(bytes, offset) != pointer)
+            {
+                continue;
+            }
+            long candidate = BaseAddress + offset;
+            if (predicate(candidate))
+            {
+                address = candidate;
+                return true;
+            }
+        }
+        address = 0;
+        return false;
     }
 
     public void Dispose()
@@ -295,6 +391,7 @@ internal sealed class SyntheticChatFixture
 {
     private readonly long arrayType;
     private readonly long messageType;
+    private readonly long virtualMessageType;
     private readonly long chatType;
     private readonly long stringType;
 
@@ -309,6 +406,10 @@ internal sealed class SyntheticChatFixture
             ("text", stringType, 8),
             ("sender", stringType, 16),
             ("channel", stringType, 24));
+        virtualMessageType = Memory.VirtualType(
+            ("text", stringType),
+            ("sender", stringType),
+            ("channel", stringType));
         chatType = Memory.ObjectType(
             "st.player.ChatClient",
             ("history", arrayType, 8));
@@ -354,8 +455,15 @@ internal sealed class SyntheticChatFixture
 
     internal void ReconnectWith(string text)
     {
-        long message = CreateMessage("Maria", "Grupo", text);
-        long history = Memory.PointerArray(arrayType, messageType, message);
+        long message = Memory.Virtual(
+            virtualMessageType,
+            Memory.HashLinkString(text, stringType),
+            Memory.HashLinkString("Maria", stringType),
+            Memory.HashLinkString("Grupo", stringType));
+        long history = Memory.PointerArray(
+            arrayType,
+            stringType,
+            message);
         CurrentChat = CreateChat(history);
         Memory.WriteInt64(Player + 16, CurrentChat);
     }

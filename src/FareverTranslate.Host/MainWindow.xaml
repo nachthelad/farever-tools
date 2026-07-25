@@ -2,17 +2,20 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Farever Translate"
-        Width="430"
-        Height="520"
-        MinWidth="360"
-        MinHeight="300"
+        Width="360"
+        Height="280"
+        MinWidth="320"
+        MinHeight="220"
+        MaxWidth="620"
+        MaxHeight="720"
         WindowStyle="None"
-        ResizeMode="NoResize"
+        ResizeMode="CanResizeWithGrip"
         AllowsTransparency="True"
         Background="Transparent"
         ShowInTaskbar="False"
         ShowActivated="False"
-        Topmost="True"
+        Topmost="False"
+        Opacity="0"
         WindowStartupLocation="CenterScreen"
         SourceInitialized="Window_SourceInitialized"
         Closing="Window_Closing">
@@ -68,49 +71,52 @@
                  Foreground="#FFFBBF24"
                  Text="Arrastrá desde el título y tocá Listo al terminar."
                  Visibility="Collapsed" />
-      <ItemsControl Grid.Row="2"
+      <ScrollViewer Grid.Row="2"
                     Margin="0,8,0,0"
-                    ItemsSource="{Binding Messages}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate>
-            <Border Background="{StaticResource CardBrush}"
-                    CornerRadius="9"
-                    Padding="10"
-                    Margin="0,0,0,7">
-              <StackPanel>
-                <DockPanel>
-                  <TextBlock Text="{Binding Sender}"
-                             Foreground="#FFBFDBFE"
-                             FontWeight="SemiBold" />
-                  <TextBlock Text="{Binding Channel, StringFormat= · {0}}"
-                             Foreground="{StaticResource MutedBrush}" />
-                </DockPanel>
-                <TextBlock Text="{Binding Original}"
-                           Foreground="White"
-                           TextWrapping="Wrap"
-                           MaxHeight="44"
-                           Margin="0,4,0,5" />
-                <TextBlock Text="{Binding Translation}"
-                           Foreground="#FFBBF7D0"
-                           TextWrapping="Wrap"
-                           Margin="0,1,0,4" />
-                <DockPanel LastChildFill="True">
-                  <Button Content="{Binding ButtonText}"
-                          IsEnabled="{Binding CanTranslate}"
-                          Tag="{Binding}"
-                          HorizontalAlignment="Left"
-                          Click="Translate_Click" />
-                  <TextBlock Text="{Binding Status}"
-                             Foreground="#FFFCA5A5"
-                             VerticalAlignment="Center"
-                             Margin="9,0,0,0"
-                             TextWrapping="Wrap" />
-                </DockPanel>
-              </StackPanel>
-            </Border>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+                    VerticalScrollBarVisibility="Auto"
+                    HorizontalScrollBarVisibility="Disabled">
+        <ItemsControl ItemsSource="{Binding Messages}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Background="{StaticResource CardBrush}"
+                      CornerRadius="9"
+                      Padding="10"
+                      Margin="0,0,0,7">
+                <StackPanel>
+                  <DockPanel>
+                    <TextBlock Text="{Binding Sender}"
+                               Foreground="#FFBFDBFE"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Channel, StringFormat= · {0}}"
+                               Foreground="{StaticResource MutedBrush}" />
+                  </DockPanel>
+                  <TextBlock Text="{Binding Original}"
+                             Foreground="White"
+                             TextWrapping="Wrap"
+                             MaxHeight="44"
+                             Margin="0,4,0,5" />
+                  <TextBlock Text="{Binding Translation}"
+                             Foreground="#FFBBF7D0"
+                             TextWrapping="Wrap"
+                             Margin="0,1,0,4" />
+                  <DockPanel LastChildFill="True">
+                    <Button Content="{Binding ButtonText}"
+                            IsEnabled="{Binding CanTranslate}"
+                            Tag="{Binding}"
+                            HorizontalAlignment="Left"
+                            Click="Translate_Click" />
+                    <TextBlock Text="{Binding Status}"
+                               Foreground="#FFFCA5A5"
+                               VerticalAlignment="Center"
+                               Margin="9,0,0,0"
+                               TextWrapping="Wrap" />
+                  </DockPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
       <TextBlock x:Name="EmptyState"
                  Grid.Row="2"
                  Margin="8,28"
@@ -123,6 +129,13 @@
                  Foreground="#FF7F8A9C"
                  FontSize="10"
                  Text="Traducción manual · destino español · Ctrl+Shift+T" />
+      <ResizeGrip Grid.Row="3"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Bottom"
+                  Width="16"
+                  Height="16"
+                  Margin="0,0,-7,-7"
+                  Panel.ZIndex="10" />
     </Grid>
   </Border>
 </Window>

@@ -13,6 +13,7 @@ internal interface IProcessMemory : IDisposable
         long stringObject,
         out string value,
         int maximumCharacters = 4096);
+    bool TryGetHashLinkTypeTable(out long typesAddress, out int typeCount);
     IReadOnlyList<long> FindPattern(
         byte[] pattern,
         bool writableOnly,
@@ -25,4 +26,13 @@ internal interface IProcessMemory : IDisposable
         IReadOnlySet<long> pointers,
         bool writableOnly,
         int maximumResults);
+    IReadOnlyList<PointerReference> FindFirstPointerReferences(
+        IReadOnlySet<long> pointers,
+        bool writableOnly);
+    bool TryFindPointer(
+        long pointer,
+        bool writableOnly,
+        bool largestRegionsFirst,
+        Func<long, bool> predicate,
+        out long address);
 }

@@ -35,6 +35,8 @@ public partial class MainWindow : Window
     private bool followingGame = true;
     private bool readerInitializationStarted;
     private bool readerInitializationComplete;
+    private bool initialCalibrationPending;
+    private IntPtr gameWindowHandle;
 
     internal MainWindow(
         HostArguments arguments,
@@ -55,6 +57,9 @@ public partial class MainWindow : Window
         this.logger = logger;
         bool firstRun = !settingsStore.Exists;
         settings = settingsStore.Load();
+        Width = settings.PanelWidth;
+        Height = settings.PanelHeight;
+        initialCalibrationPending = firstRun;
         gameWindow = new GameWindowTracker(arguments.ProcessId);
         DataContext = this;
 
@@ -65,13 +70,7 @@ public partial class MainWindow : Window
             Dispatcher);
         timer.Start();
         ReaderState.Text = reader.Diagnostic;
-        Visibility = settings.PanelVisible
-            ? Visibility.Visible
-            : Visibility.Hidden;
-        if (firstRun)
-        {
-            Loaded += (_, _) => SetCalibrationMode(enabled: true);
-        }
+        Visibility = Visibility.Hidden;
         Loaded += InitializeReader;
     }
 
@@ -113,7 +112,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        UpdateGamePosition();
         if (readerInitializationComplete)
         {
             IReadOnlyList<ChatMessageSnapshot> snapshots =
@@ -121,26 +119,41 @@ public partial class MainWindow : Window
             ReaderState.Text = reader.Diagnostic;
             ReconcileMessages(snapshots);
         }
+        UpdateGamePosition();
     }
 
     private void UpdateGamePosition()
     {
         if (!gameWindow.TryGetWindow(
-                out _,
+                out IntPtr currentGameWindow,
                 out WindowRect rectangle,
                 out double scale,
                 out bool minimized))
         {
-            Visibility = settings.PanelVisible
-                ? Visibility.Visible
-                : Visibility.Hidden;
+            ApplyVisibility(calibrationMode && settings.PanelVisible);
             return;
         }
 
-        bool shouldShow = settings.PanelVisible && !minimized;
-        Visibility = shouldShow
-            ? Visibility.Visible
-            : Visibility.Hidden;
+        if (currentGameWindow != gameWindowHandle)
+        {
+            gameWindowHandle = currentGameWindow;
+            NativeWindow.SetOwner(this, currentGameWindow);
+        }
+
+        bool inWorld = readerInitializationComplete
+            && reader.Status == ChatReaderStatus.Ready;
+        if (initialCalibrationPending && inWorld && !minimized)
+        {
+            initialCalibrationPending = false;
+            SetCalibrationMode(enabled: true);
+            return;
+        }
+
+        bool shouldShow = settings.PanelVisible
+            && !minimized
+            && (calibrationMode
+                || (inWorld && gameWindow.IsForeground));
+        ApplyVisibility(shouldShow);
         if (!shouldShow || !followingGame || calibrationMode)
         {
             return;
@@ -325,6 +338,7 @@ public partial class MainWindow : Window
         {
             SaveCalibration();
             followingGame = true;
+            UpdateGamePosition();
         }
     }
 
@@ -340,12 +354,18 @@ public partial class MainWindow : Window
 
     private void SaveCalibration()
     {
+        settings = settings with
+        {
+            PanelWidth = ActualWidth,
+            PanelHeight = ActualHeight,
+        };
         if (!gameWindow.TryGetWindow(
                 out _,
                 out WindowRect rectangle,
                 out double scale,
                 out _))
         {
+            settingsStore.Save(settings);
             return;
         }
         settings = settings with
@@ -353,6 +373,8 @@ public partial class MainWindow : Window
             OffsetX = Left - rectangle.Left / scale,
             OffsetFromBottom =
                 rectangle.Bottom / scale - (Top + ActualHeight),
+            PanelWidth = ActualWidth,
+            PanelHeight = ActualHeight,
         };
         settingsStore.Save(settings);
     }
@@ -364,9 +386,28 @@ public partial class MainWindow : Window
     {
         settings = settings with { PanelVisible = visible };
         settingsStore.Save(settings);
-        Visibility = visible
-            ? Visibility.Visible
-            : Visibility.Hidden;
+        if (!visible)
+        {
+            ApplyVisibility(false);
+        }
+        else
+        {
+            UpdateGamePosition();
+        }
+    }
+
+    private void ApplyVisibility(bool visible)
+    {
+        if (visible)
+        {
+            Visibility = Visibility.Visible;
+            Opacity = 1;
+        }
+        else
+        {
+            Opacity = 0;
+            Visibility = Visibility.Hidden;
+        }
     }
 
     private IntPtr WindowProcedure(
@@ -388,6 +429,12 @@ public partial class MainWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         timer.Stop();
+        settings = settings with
+        {
+            PanelWidth = ActualWidth,
+            PanelHeight = ActualHeight,
+        };
+        settingsStore.Save(settings);
         if (readerInitializationComplete)
         {
             reader.Dispose();

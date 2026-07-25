@@ -66,12 +66,17 @@ original cuando todos los hashes coinciden.
 - Abrir Farever en ventana o ventana sin bordes.
 - Pulsar **Clave** y guardar una API key restringida a Cloud Translation API.
 - Pulsar **Traducir** en una línea; no hay traducción automática.
-- Usar **Calibrar** para arrastrar el panel junto al chat.
+- El panel aparece únicamente dentro del mundo y mientras Farever está en
+  primer plano. Se oculta en cargas, minimizado y al cambiar de aplicación.
+- Usar **Calibrar** para arrastrar o redimensionar el panel junto al chat. El
+  tamaño y la posición quedan guardados.
 - Alternar el panel con `Ctrl+Shift+T`.
 
 Consulta [Google Cloud](docs/GOOGLE_CLOUD.md), los
 [límites de seguridad](docs/SECURITY.md) y el
-[diseño aprobado](docs/superpowers/specs/2026-07-25-farever-chat-translator-design.md).
+[diseño base](docs/superpowers/specs/2026-07-25-farever-chat-translator-design.md),
+además del
+[diseño del panel compacto](docs/superpowers/specs/2026-07-25-game-bound-compact-overlay-design.md).
 
 ## Pruebas
 
@@ -79,9 +84,10 @@ Consulta [Google Cloud](docs/GOOGLE_CLOUD.md), los
 .\scripts\Test-All.ps1
 ```
 
-La suite cubre memoria HashLink sintética (Unicode, duplicados, punteros
-inválidos y reconexión), build desconocido, respuestas de Google, DPAPI,
-caché, DPI, los cinco exports y el ciclo instalación/restauración.
+La suite cubre objetos y registros virtuales HashLink sintéticos (Unicode,
+duplicados, punteros inválidos y reconexión), build desconocido, respuestas de
+Google, DPAPI, caché, DPI, los cinco exports y el ciclo
+instalación/restauración.
 
 Quedan como pruebas manuales previas al uso cotidiano: validar el minimapa/DPS
 en el juego, comprobar el ajuste visual del panel y completar una sesión de

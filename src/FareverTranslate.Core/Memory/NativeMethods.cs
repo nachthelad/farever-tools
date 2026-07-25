@@ -8,6 +8,7 @@ internal static class NativeMethods
     internal const uint ProcessVmRead = 0x0010;
     internal const uint ProcessQueryLimitedInformation = 0x1000;
     internal const uint MemCommit = 0x1000;
+    internal const uint MemPrivate = 0x20000;
     internal const uint PageNoAccess = 0x01;
     internal const uint PageGuard = 0x100;
     internal const uint WritableMask = 0x04 | 0x08 | 0x40 | 0x80;
@@ -62,4 +63,3 @@ internal static class NativeMethods
         protected override bool ReleaseHandle() => CloseHandle(handle);
     }
 }
-

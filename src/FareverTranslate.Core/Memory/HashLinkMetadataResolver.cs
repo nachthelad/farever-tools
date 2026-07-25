@@ -32,7 +32,8 @@ public sealed record ResolvedHashLinkField(
     string Name,
     int Offset,
     long TypeAddress,
-    HashLinkTypeKind TypeKind);
+    HashLinkTypeKind TypeKind,
+    bool IsIndirect = false);
 
 public sealed class ResolvedHashLinkType
 {
@@ -56,6 +57,7 @@ public sealed class ResolvedHashLinkType
 
 public sealed class HashLinkMetadataResolver
 {
+    private const int TypeSize = 32;
     private readonly IProcessMemory memory;
     private readonly Dictionary<long, ResolvedHashLinkType> byAddress = new();
 
@@ -83,22 +85,38 @@ public sealed class HashLinkMetadataResolver
             return new Dictionary<string, ResolvedHashLinkType>();
         }
 
+        if (memory.TryGetHashLinkTypeTable(
+                out long typesAddress,
+                out int typeCount))
+        {
+            return ResolveFromTypeTable(
+                requested,
+                typesAddress,
+                typeCount);
+        }
+        if (memory is ProcessMemory)
+        {
+            return new Dictionary<string, ResolvedHashLinkType>();
+        }
+
         var namesByAddress = new Dictionary<long, string>();
         foreach (string requestedName in requested)
         {
-            foreach (byte[] namePattern in new[]
+            byte[] unicodePattern = Encoding.Unicode.GetBytes(requestedName + "\0");
+            IReadOnlyList<long> nameAddresses = memory.FindPattern(
+                unicodePattern,
+                writableOnly: true,
+                maximumResults: 1);
+            if (nameAddresses.Count == 0)
             {
-                Encoding.Unicode.GetBytes(requestedName + "\0"),
-                Encoding.UTF8.GetBytes(requestedName + "\0"),
-            })
+                nameAddresses = memory.FindPattern(
+                    Encoding.UTF8.GetBytes(requestedName + "\0"),
+                    writableOnly: true,
+                    maximumResults: 1);
+            }
+            foreach (long nameAddress in nameAddresses)
             {
-                foreach (long nameAddress in memory.FindPattern(
-                             namePattern,
-                             writableOnly: false,
-                             maximumResults: 64))
-                {
-                    namesByAddress.TryAdd(nameAddress, requestedName);
-                }
+                namesByAddress.TryAdd(nameAddress, requestedName);
             }
         }
         if (namesByAddress.Count == 0)
@@ -107,15 +125,19 @@ public sealed class HashLinkMetadataResolver
         }
 
         var typeObjectNames = new Dictionary<long, string>();
-        foreach (PointerReference reference in memory.FindPointerReferences(
-                     namesByAddress.Keys.ToHashSet(),
-                     writableOnly: false,
-                     maximumResults: 4096))
+        foreach ((long nameAddress, string requestedName) in namesByAddress)
         {
-            string requestedName = namesByAddress[reference.Target];
-            long typeObject = reference.Address - 16;
-            if (ValidateTypeObject(typeObject, requestedName))
+            if (memory.TryFindPointer(
+                    nameAddress,
+                    writableOnly: true,
+                    largestRegionsFirst: false,
+                    referenceAddress =>
+                        ValidateTypeObject(
+                            referenceAddress - 16,
+                            requestedName),
+                    out long nameReference))
             {
+                long typeObject = nameReference - 16;
                 typeObjectNames.TryAdd(typeObject, requestedName);
             }
         }
@@ -126,22 +148,90 @@ public sealed class HashLinkMetadataResolver
 
         var result = new Dictionary<string, ResolvedHashLinkType>(
             StringComparer.Ordinal);
-        foreach (PointerReference reference in memory.FindPointerReferences(
-                     typeObjectNames.Keys.ToHashSet(),
-                     writableOnly: false,
-                     maximumResults: 4096))
+        foreach ((long typeObject, string requestedName) in typeObjectNames)
         {
-            long typeAddress = reference.Address - 8;
-            ResolvedHashLinkType? resolved = ResolveByAddress(typeAddress);
-            string requestedName = typeObjectNames[reference.Target];
-            if (resolved is not null
-                && string.Equals(
-                    resolved.Name,
-                    requestedName,
-                    StringComparison.Ordinal))
+            ResolvedHashLinkType? matched = null;
+            if (memory.TryFindPointer(
+                    typeObject,
+                    writableOnly: true,
+                    largestRegionsFirst: false,
+                    referenceAddress =>
+                    {
+                        ResolvedHashLinkType? candidate =
+                            ResolveByAddress(referenceAddress - 8);
+                        if (candidate is null
+                            || !string.Equals(
+                                candidate.Name,
+                                requestedName,
+                                StringComparison.Ordinal))
+                        {
+                            return false;
+                        }
+                        matched = candidate;
+                        return true;
+                    },
+                    out _)
+                && matched is not null)
             {
-                result.TryAdd(requestedName, resolved);
+                result.TryAdd(requestedName, matched);
             }
+        }
+        return result;
+    }
+
+    private IReadOnlyDictionary<string, ResolvedHashLinkType>
+        ResolveFromTypeTable(
+            IReadOnlyCollection<string> requestedNames,
+            long typesAddress,
+            int typeCount)
+    {
+        int byteCount;
+        try
+        {
+            byteCount = checked(typeCount * TypeSize);
+        }
+        catch (OverflowException)
+        {
+            return new Dictionary<string, ResolvedHashLinkType>();
+        }
+        if (byteCount > 16 * 1024 * 1024
+            || !memory.TryReadBytes(
+                typesAddress,
+                byteCount,
+                out byte[] types))
+        {
+            return new Dictionary<string, ResolvedHashLinkType>();
+        }
+
+        var pending = requestedNames.ToHashSet(StringComparer.Ordinal);
+        var result = new Dictionary<string, ResolvedHashLinkType>(
+            StringComparer.Ordinal);
+        for (int index = 0;
+             index < typeCount && pending.Count > 0;
+             index++)
+        {
+            int offset = index * TypeSize;
+            if (BitConverter.ToInt32(types, offset)
+                != (int)HashLinkTypeKind.Object)
+            {
+                continue;
+            }
+
+            long typeObject = BitConverter.ToInt64(types, offset + 8);
+            string? name = ReadObjectTypeName(typeObject);
+            if (name is null || !pending.Contains(name))
+            {
+                continue;
+            }
+
+            long typeAddress = typesAddress + offset;
+            ResolvedHashLinkType? resolved = ResolveByAddress(typeAddress);
+            if (resolved is null)
+            {
+                continue;
+            }
+            result[name] = resolved;
+            pending.Remove(name);
         }
         return result;
     }
@@ -152,13 +242,24 @@ public sealed class HashLinkMetadataResolver
         {
             return cached;
         }
-        if (!memory.TryReadBytes(typeAddress, 16, out byte[] typeBytes)
-            || BitConverter.ToInt32(typeBytes, 0) != (int)HashLinkTypeKind.Object)
+        if (!memory.TryReadBytes(typeAddress, 16, out byte[] typeBytes))
         {
             return null;
         }
 
+        HashLinkTypeKind kind = (HashLinkTypeKind)BitConverter.ToInt32(
+            typeBytes,
+            0);
         long typeObject = BitConverter.ToInt64(typeBytes, 8);
+        if (kind == HashLinkTypeKind.Virtual)
+        {
+            return ResolveVirtualByAddress(typeAddress, typeObject);
+        }
+        if (kind != HashLinkTypeKind.Object)
+        {
+            return null;
+        }
+
         string? name = ReadObjectTypeName(typeObject);
         if (string.IsNullOrEmpty(name))
         {
@@ -189,6 +290,10 @@ public sealed class HashLinkMetadataResolver
                 continue;
             }
             RawField raw = rawFields[index];
+            if (string.IsNullOrEmpty(raw.Name))
+            {
+                continue;
+            }
             fields[raw.Name] = new ResolvedHashLinkField(
                 raw.Name,
                 offset,
@@ -205,6 +310,68 @@ public sealed class HashLinkMetadataResolver
             typeAddress,
             typeObject,
             name,
+            fields);
+        byAddress[typeAddress] = result;
+        return result;
+    }
+
+    private ResolvedHashLinkType? ResolveVirtualByAddress(
+        long typeAddress,
+        long virtualType)
+    {
+        if (!memory.TryReadBytes(
+                virtualType,
+                32,
+                out byte[] virtualHeader))
+        {
+            return null;
+        }
+        long fieldsAddress = BitConverter.ToInt64(virtualHeader, 0);
+        int fieldCount = BitConverter.ToInt32(virtualHeader, 8);
+        if (fieldCount is < 0 or > 4096
+            || (fieldCount > 0
+                && !ProcessMemory.IsUserAddress(fieldsAddress)))
+        {
+            return null;
+        }
+
+        var fields = new Dictionary<string, ResolvedHashLinkField>(
+            StringComparer.Ordinal);
+        for (int index = 0; index < fieldCount; index++)
+        {
+            long fieldAddress = fieldsAddress + index * 24L;
+            if (!memory.TryReadPointer(
+                    fieldAddress,
+                    out long nameAddress)
+                || !memory.TryReadPointer(
+                    fieldAddress + 8,
+                    out long fieldType))
+            {
+                continue;
+            }
+            string? name = memory.ReadNativeString(nameAddress);
+            if (string.IsNullOrEmpty(name))
+            {
+                continue;
+            }
+            fields[name] = new ResolvedHashLinkField(
+                name,
+                24 + index * 8,
+                fieldType,
+                ReadKind(fieldType),
+                IsIndirect: true);
+        }
+        if (fields.Count == 0)
+        {
+            return null;
+        }
+
+        string nameDisplay =
+            $"virtual<{string.Join(',', fields.Keys)}>";
+        var result = new ResolvedHashLinkType(
+            typeAddress,
+            virtualType,
+            nameDisplay,
             fields);
         byAddress[typeAddress] = result;
         return result;
@@ -278,10 +445,7 @@ public sealed class HashLinkMetadataResolver
                 continue;
             }
             string? name = memory.ReadNativeString(nameAddress);
-            if (!string.IsNullOrEmpty(name))
-            {
-                result.Add(new RawField(name, fieldType));
-            }
+            result.Add(new RawField(name ?? string.Empty, fieldType));
         }
         return result;
     }

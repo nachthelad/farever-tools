@@ -7,6 +7,8 @@ public sealed record AppSettings
     public double OffsetX { get; init; } = 24;
     public double OffsetFromBottom { get; init; } = 260;
     public bool PanelVisible { get; init; } = true;
+    public double PanelWidth { get; init; } = 360;
+    public double PanelHeight { get; init; } = 280;
     public int MaximumMessages { get; init; } = 6;
     public string TargetLanguage { get; init; } = "es";
 }
@@ -68,6 +70,12 @@ public sealed class SettingsStore
             OffsetFromBottom = double.IsFinite(settings.OffsetFromBottom)
                 ? Math.Clamp(settings.OffsetFromBottom, -4000, 4000)
                 : 260,
+            PanelWidth = double.IsFinite(settings.PanelWidth)
+                ? Math.Clamp(settings.PanelWidth, 320, 620)
+                : 360,
+            PanelHeight = double.IsFinite(settings.PanelHeight)
+                ? Math.Clamp(settings.PanelHeight, 220, 720)
+                : 280,
             MaximumMessages = 6,
             TargetLanguage = "es",
         };

@@ -207,7 +207,82 @@ public sealed class HashLinkChatReader : IDisposable
             ',',
             chatClientType.Fields.Values.Select(
                 field => $"{field.Name}:{field.TypeKind}@{field.Offset}"));
-        return $"player=[{playerFields}] chat=[{chatFields}]";
+        string historyDescription = DescribeHistoryLayout();
+        return $"player=[{playerFields}] chat=[{chatFields}] {historyDescription}";
+    }
+
+    private string DescribeHistoryLayout()
+    {
+        if (memory is null
+            || resolver is null
+            || chatClientType is null
+            || chatClient == 0
+            || !chatClientType.Fields.TryGetValue(
+                "history",
+                out ResolvedHashLinkField? historyField)
+            || !memory.TryReadPointer(
+                chatClient + historyField.Offset,
+                out long history)
+            || history == 0
+            || !memory.TryReadPointer(history, out long historyTypeAddress))
+        {
+            return "history=unavailable";
+        }
+        ResolvedHashLinkType? historyType =
+            resolver.ResolveByAddress(historyTypeAddress);
+        if (historyType is null)
+        {
+            return $"history=0x{history:X}/type=0x{historyTypeAddress:X}";
+        }
+        string fields = string.Join(
+            ',',
+            historyType.Fields.Values.Select(
+                field => $"{field.Name}:{field.TypeKind}@{field.Offset}"));
+        string arrayDetails = string.Empty;
+        if (historyType.Fields.TryGetValue(
+                "length",
+                out ResolvedHashLinkField? lengthField)
+            && historyType.Fields.TryGetValue(
+                "array",
+                out ResolvedHashLinkField? arrayField)
+            && memory.TryReadInt32(
+                history + lengthField.Offset,
+                out int logicalLength)
+            && memory.TryReadPointer(
+                history + arrayField.Offset,
+                out long array)
+            && memory.TryReadBytes(array, 24, out byte[] arrayHeader))
+        {
+            long elementType = BitConverter.ToInt64(arrayHeader, 8);
+            int capacity = BitConverter.ToInt32(arrayHeader, 16);
+            arrayDetails =
+                $" length={logicalLength} capacity={capacity}" +
+                $" element={ReadTypeDisplay(elementType)}";
+        }
+        IReadOnlyList<long> entries = ReadContainer(
+            history,
+            historyField.TypeAddress,
+            depth: 0);
+        string entryTypes = string.Join(
+            ',',
+            entries.Take(12).Select(entry =>
+                memory.TryReadPointer(entry, out long entryType)
+                    ? ReadTypeDisplay(entryType)
+                    : "unreadable"));
+        return $"history={historyType.Name}[{fields}]{arrayDetails}" +
+            $" entries={entries.Count}[{entryTypes}]";
+    }
+
+    private string ReadTypeDisplay(long typeAddress)
+    {
+        if (resolver is null)
+        {
+            return "unknown";
+        }
+        ResolvedHashLinkType? objectType =
+            resolver.ResolveByAddress(typeAddress);
+        return objectType?.Name
+            ?? resolver.ReadKind(typeAddress).ToString();
     }
 
     public void Dispose()
@@ -238,45 +313,40 @@ public sealed class HashLinkChatReader : IDisposable
 
         ResolvedHashLinkField isMeField = playerType.Fields["isMe"];
         ResolvedHashLinkField chatField = playerType.Fields["chatClient"];
-        var matches = new List<(long Player, long Chat)>();
-        foreach (long possiblePlayer in memory.FindPointer(
-                     playerType.TypeAddress,
-                     writableOnly: true,
-                     maximumResults: 8192))
-        {
-            if (!memory.TryReadByte(
-                    possiblePlayer + isMeField.Offset,
-                    out byte isMe)
-                || isMe == 0
-                || !memory.TryReadPointer(
-                    possiblePlayer + chatField.Offset,
-                    out long possibleChat)
-                || possibleChat == 0
-                || !memory.TryReadPointer(possibleChat, out long possibleChatType)
-                || possibleChatType != chatClientType.TypeAddress)
-            {
-                continue;
-            }
-            matches.Add((possiblePlayer, possibleChat));
-            if (matches.Count > 1)
-            {
-                break;
-            }
-        }
-
-        if (matches.Count != 1)
+        long locatedChat = 0;
+        if (!memory.TryFindPointer(
+                playerType.TypeAddress,
+                writableOnly: true,
+                largestRegionsFirst: true,
+                possiblePlayer =>
+                {
+                    if (!memory.TryReadByte(
+                            possiblePlayer + isMeField.Offset,
+                            out byte isMe)
+                        || isMe == 0
+                        || !memory.TryReadPointer(
+                            possiblePlayer + chatField.Offset,
+                            out long possibleChat)
+                        || possibleChat == 0
+                        || !memory.TryReadPointer(
+                            possibleChat,
+                            out long possibleChatType)
+                        || possibleChatType != chatClientType.TypeAddress)
+                    {
+                        return false;
+                    }
+                    locatedChat = possibleChat;
+                    return true;
+                },
+                out long locatedPlayer))
         {
             return Fail(
-                matches.Count > 1
-                    ? ChatReaderStatus.UnsupportedBuild
-                    : ChatReaderStatus.PlayerNotFound,
-                matches.Count > 1
-                    ? "Se encontraron varios jugadores locales"
-                    : "Esperando al personaje");
+                ChatReaderStatus.PlayerNotFound,
+                "Esperando al personaje");
         }
 
-        localPlayer = matches[0].Player;
-        chatClient = matches[0].Chat;
+        localPlayer = locatedPlayer;
+        chatClient = locatedChat;
         localPlayerName = ReadNestedString(
             localPlayer,
             playerType,
@@ -339,13 +409,30 @@ public sealed class HashLinkChatReader : IDisposable
             return Array.Empty<long>();
         }
 
+        if (objectType.Fields.TryGetValue(
+                "length",
+                out ResolvedHashLinkField? lengthField)
+            && objectType.Fields.TryGetValue(
+                "array",
+                out ResolvedHashLinkField? arrayField)
+            && memory.TryReadInt32(
+                container + lengthField.Offset,
+                out int logicalLength)
+            && memory.TryReadPointer(
+                container + arrayField.Offset,
+                out long backingArray)
+            && logicalLength >= 0)
+        {
+            return ReadPointerArray(backingArray, logicalLength);
+        }
+
         foreach (string fieldName in ContainerFields)
         {
             if (!objectType.Fields.TryGetValue(
                     fieldName,
                     out ResolvedHashLinkField? field)
                 || !memory.TryReadPointer(
-                    container + field.Offset,
+                    GetFieldValueAddress(container, field),
                     out long nested)
                 || nested == 0)
             {
@@ -365,7 +452,7 @@ public sealed class HashLinkChatReader : IDisposable
                 "h",
                 out ResolvedHashLinkField? headField)
             && memory.TryReadPointer(
-                container + headField.Offset,
+                GetFieldValueAddress(container, headField),
                 out long head)
             && head != 0)
         {
@@ -384,15 +471,22 @@ public sealed class HashLinkChatReader : IDisposable
             && resolver.ReadKind(type) == HashLinkTypeKind.Array;
     }
 
-    private IReadOnlyList<long> ReadPointerArray(long array)
+    private IReadOnlyList<long> ReadPointerArray(
+        long array,
+        int? logicalCount = null)
     {
         if (memory is null
+            || resolver is null
             || !memory.TryReadBytes(array, 24, out byte[] header))
         {
             return Array.Empty<long>();
         }
 
-        int size = BitConverter.ToInt32(header, 16);
+        long elementType = BitConverter.ToInt64(header, 8);
+        int capacity = BitConverter.ToInt32(header, 16);
+        int size = logicalCount.HasValue
+            ? Math.Min(logicalCount.Value, capacity)
+            : capacity;
         if (size < 0 || size > 4096)
         {
             return Array.Empty<long>();
@@ -401,7 +495,13 @@ public sealed class HashLinkChatReader : IDisposable
         {
             return Array.Empty<long>();
         }
-        if (!memory.TryReadBytes(array + 24, checked(size * 8), out byte[] data))
+
+        HashLinkTypeKind elementKind = resolver.ReadKind(elementType);
+        const int elementSize = 8;
+        if (!memory.TryReadBytes(
+                array + 24,
+                checked(size * elementSize),
+                out byte[] data))
         {
             return Array.Empty<long>();
         }
@@ -409,7 +509,29 @@ public sealed class HashLinkChatReader : IDisposable
         var result = new List<long>(size);
         for (int index = 0; index < size; index++)
         {
-            long pointer = BitConverter.ToInt64(data, index * 8);
+            int offset = index * elementSize;
+            long pointer = BitConverter.ToInt64(data, offset);
+            if (elementKind == HashLinkTypeKind.Dynamic)
+            {
+                if (!ProcessMemory.IsUserAddress(pointer)
+                    || !memory.TryReadPointer(pointer, out long valueType))
+                {
+                    continue;
+                }
+                HashLinkTypeKind valueKind = resolver.ReadKind(
+                    valueType);
+                if (valueKind is not (
+                    HashLinkTypeKind.Object
+                    or HashLinkTypeKind.Array
+                    or HashLinkTypeKind.Enum
+                    or HashLinkTypeKind.Virtual
+                    or HashLinkTypeKind.DynamicObject
+                    or HashLinkTypeKind.Struct
+                    or HashLinkTypeKind.Null))
+                {
+                    continue;
+                }
+            }
             if (ProcessMemory.IsUserAddress(pointer))
             {
                 result.Add(pointer);
@@ -513,7 +635,7 @@ public sealed class HashLinkChatReader : IDisposable
             }
             if (field.TypeKind == HashLinkTypeKind.Enum
                 && memory.TryReadPointer(
-                    objectAddress + field.Offset,
+                    GetFieldValueAddress(objectAddress, field),
                     out long enumValue))
             {
                 string? enumName = resolver.TryReadEnumName(enumValue);
@@ -531,7 +653,9 @@ public sealed class HashLinkChatReader : IDisposable
             {
                 return nested;
             }
-            if (memory.TryReadInt32(objectAddress + field.Offset, out int numeric))
+            if (memory.TryReadInt32(
+                    GetFieldValueAddress(objectAddress, field),
+                    out int numeric))
             {
                 return numeric.ToString(
                     System.Globalization.CultureInfo.InvariantCulture);
@@ -553,8 +677,9 @@ public sealed class HashLinkChatReader : IDisposable
         foreach (string alias in aliases)
         {
             if (!type.Fields.TryGetValue(alias, out ResolvedHashLinkField? field)
-                || !memory.TryReadPointer(
-                    objectAddress + field.Offset,
+                || !TryReadFieldPointer(
+                    objectAddress,
+                    field,
                     out long value)
                 || value == 0)
             {
@@ -600,8 +725,9 @@ public sealed class HashLinkChatReader : IDisposable
         foreach (string alias in aliases)
         {
             if (type.Fields.TryGetValue(alias, out ResolvedHashLinkField? field)
-                && memory.TryReadPointer(
-                    objectAddress + field.Offset,
+                && TryReadFieldPointer(
+                    objectAddress,
+                    field,
                     out long value)
                 && ProcessMemory.IsUserAddress(value))
             {
@@ -609,6 +735,32 @@ public sealed class HashLinkChatReader : IDisposable
             }
         }
         return 0;
+    }
+
+    private bool TryReadFieldPointer(
+        long objectAddress,
+        ResolvedHashLinkField field,
+        out long value)
+    {
+        value = 0;
+        return memory is not null
+            && memory.TryReadPointer(
+                GetFieldValueAddress(objectAddress, field),
+                out value);
+    }
+
+    private long GetFieldValueAddress(
+        long objectAddress,
+        ResolvedHashLinkField field)
+    {
+        long fieldAddress = objectAddress + field.Offset;
+        if (!field.IsIndirect
+            || memory is null
+            || !memory.TryReadPointer(fieldAddress, out long storage))
+        {
+            return field.IsIndirect ? 0 : fieldAddress;
+        }
+        return storage;
     }
 
     private bool Fail(ChatReaderStatus status, string diagnostic)
@@ -635,12 +787,35 @@ public sealed class HashLinkChatReader : IDisposable
             resolver.ResolveMany(["st.Player", "st.player.ChatClient"]);
         playerType = resolved.GetValueOrDefault("st.Player");
         chatClientType = resolved.GetValueOrDefault("st.player.ChatClient");
-        if (playerType is null
-            || chatClientType is null
-            || !playerType.Fields.ContainsKey("isMe")
-            || !playerType.Fields.ContainsKey("chatClient")
-            || !chatClientType.Fields.ContainsKey("history"))
+        if (playerType is null)
         {
+            logger.Warn("hashlink_type_missing", "st.Player");
+            return Fail(
+                ChatReaderStatus.UnsupportedBuild,
+                "No se encontró st.Player");
+        }
+        if (chatClientType is null)
+        {
+            logger.Warn("hashlink_type_missing", "st.player.ChatClient");
+            return Fail(
+                ChatReaderStatus.UnsupportedBuild,
+                "No se encontró st.player.ChatClient");
+        }
+
+        string[] missingFields =
+        [
+            .. new[]
+            {
+                playerType.Fields.ContainsKey("isMe") ? null : "st.Player.isMe",
+                playerType.Fields.ContainsKey("chatClient") ? null : "st.Player.chatClient",
+                chatClientType.Fields.ContainsKey("history") ? null : "st.player.ChatClient.history",
+            }.Where(field => field is not null).Select(field => field!),
+        ];
+        if (missingFields.Length > 0)
+        {
+            logger.Warn(
+                "hashlink_fields_missing",
+                string.Join(',', missingFields));
             return Fail(
                 ChatReaderStatus.UnsupportedBuild,
                 "Metadatos de chat incompletos");
