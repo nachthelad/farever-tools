@@ -20,3 +20,6 @@
 *.local.json
 *.log
 *.dmp
+
+# Local visual brainstorming sessions
+/.superpowers/
