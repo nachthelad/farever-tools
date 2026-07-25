@@ -1,0 +1,21 @@
+# Reference binaries downloaded for analysis
+/_analysis_v1.2.3/
+/farever-minimap-dps-*.zip
+
+# .NET
+**/bin/
+**/obj/
+/.vs/
+*.user
+
+# Native build output
+/artifacts/
+/native/**/x64/
+/native/**/Debug/
+/native/**/Release/
+
+# Local secrets and diagnostics
+*.local.json
+*.log
+*.dmp
+
