@@ -1,5 +1,7 @@
 namespace FareverTranslate.Core.Memory;
 
+internal readonly record struct PointerReference(long Target, long Address);
+
 internal interface IProcessMemory : IDisposable
 {
     bool TryReadBytes(long address, int count, out byte[] buffer);
@@ -17,6 +19,10 @@ internal interface IProcessMemory : IDisposable
         int maximumResults);
     IReadOnlyList<long> FindPointer(
         long pointer,
+        bool writableOnly,
+        int maximumResults);
+    IReadOnlyList<PointerReference> FindPointerReferences(
+        IReadOnlySet<long> pointers,
         bool writableOnly,
         int maximumResults);
 }

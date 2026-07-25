@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Buffers.Binary;
 using System.Text;
 
 namespace FareverTranslate.Core.Memory;
@@ -214,6 +215,59 @@ public sealed class ProcessMemory : IProcessMemory
         FindPattern(BitConverter.GetBytes(pointer), writableOnly, maximumResults)
             .Where(address => (address & 7) == 0)
             .ToArray();
+
+    IReadOnlyList<PointerReference> IProcessMemory.FindPointerReferences(
+        IReadOnlySet<long> pointers,
+        bool writableOnly,
+        int maximumResults)
+    {
+        if (pointers.Count == 0 || maximumResults <= 0)
+        {
+            return Array.Empty<PointerReference>();
+        }
+
+        var results = new List<PointerReference>();
+        foreach (MemoryRegion region in EnumerateRegions(writableOnly))
+        {
+            long offset = 0;
+            while (offset < region.Size && results.Count < maximumResults)
+            {
+                int requested = (int)Math.Min(ChunkSize, region.Size - offset);
+                long chunkAddress = region.BaseAddress + offset;
+                if (!TryReadBytes(chunkAddress, requested, out byte[] chunk))
+                {
+                    offset += requested;
+                    continue;
+                }
+
+                int alignment = (int)((8 - (chunkAddress & 7)) & 7);
+                for (int index = alignment;
+                     index + sizeof(long) <= chunk.Length;
+                     index += sizeof(long))
+                {
+                    long target = BinaryPrimitives.ReadInt64LittleEndian(
+                        chunk.AsSpan(index, sizeof(long)));
+                    if (!pointers.Contains(target))
+                    {
+                        continue;
+                    }
+                    results.Add(new PointerReference(
+                        target,
+                        chunkAddress + index));
+                    if (results.Count >= maximumResults)
+                    {
+                        break;
+                    }
+                }
+                offset += requested;
+            }
+            if (results.Count >= maximumResults)
+            {
+                break;
+            }
+        }
+        return results;
+    }
 
     public static bool IsUserAddress(long address) =>
         address >= 0x10000 && address <= MaximumUserAddress;

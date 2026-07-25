@@ -243,6 +243,27 @@ internal sealed class SyntheticHashLinkMemory : IProcessMemory
             .Where(address => (address & 7) == 0)
             .ToArray();
 
+    public IReadOnlyList<PointerReference> FindPointerReferences(
+        IReadOnlySet<long> pointers,
+        bool writableOnly,
+        int maximumResults)
+    {
+        var results = new List<PointerReference>();
+        for (int offset = 0;
+             offset + sizeof(long) <= cursor && results.Count < maximumResults;
+             offset += sizeof(long))
+        {
+            long target = BitConverter.ToInt64(bytes, offset);
+            if (pointers.Contains(target))
+            {
+                results.Add(new PointerReference(
+                    target,
+                    BaseAddress + offset));
+            }
+        }
+        return results;
+    }
+
     public void Dispose()
     {
     }

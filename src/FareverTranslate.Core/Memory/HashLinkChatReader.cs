@@ -631,8 +631,10 @@ public sealed class HashLinkChatReader : IDisposable
         }
 
         resolver = new HashLinkMetadataResolver(memory);
-        playerType = resolver.Resolve("st.Player");
-        chatClientType = resolver.Resolve("st.player.ChatClient");
+        IReadOnlyDictionary<string, ResolvedHashLinkType> resolved =
+            resolver.ResolveMany(["st.Player", "st.player.ChatClient"]);
+        playerType = resolved.GetValueOrDefault("st.Player");
+        chatClientType = resolved.GetValueOrDefault("st.player.ChatClient");
         if (playerType is null
             || chatClientType is null
             || !playerType.Fields.ContainsKey("isMe")

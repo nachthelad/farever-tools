@@ -66,49 +66,84 @@ public sealed class HashLinkMetadataResolver
 
     public ResolvedHashLinkType? Resolve(string requestedName)
     {
-        foreach (byte[] namePattern in new[]
-        {
-            Encoding.UTF8.GetBytes(requestedName + "\0"),
-            Encoding.Unicode.GetBytes(requestedName + "\0"),
-        })
-        {
-            foreach (long nameAddress in memory.FindPattern(
-                         namePattern,
-                         writableOnly: false,
-                         maximumResults: 64))
-            {
-                foreach (long nameReference in memory.FindPointer(
-                             nameAddress,
-                             writableOnly: false,
-                             maximumResults: 128))
-                {
-                    long typeObject = nameReference - 16;
-                    if (!ValidateTypeObject(typeObject, requestedName))
-                    {
-                        continue;
-                    }
+        IReadOnlyDictionary<string, ResolvedHashLinkType> resolved =
+            ResolveMany([requestedName]);
+        return resolved.GetValueOrDefault(requestedName);
+    }
 
-                    foreach (long objectReference in memory.FindPointer(
-                                 typeObject,
-                                 writableOnly: false,
-                                 maximumResults: 128))
-                    {
-                        long typeAddress = objectReference - 8;
-                        ResolvedHashLinkType? resolved =
-                            ResolveByAddress(typeAddress);
-                        if (resolved is not null
-                            && string.Equals(
-                                resolved.Name,
-                                requestedName,
-                                StringComparison.Ordinal))
-                        {
-                            return resolved;
-                        }
-                    }
+    public IReadOnlyDictionary<string, ResolvedHashLinkType> ResolveMany(
+        IReadOnlyCollection<string> requestedNames)
+    {
+        var requested = requestedNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (requested.Length == 0)
+        {
+            return new Dictionary<string, ResolvedHashLinkType>();
+        }
+
+        var namesByAddress = new Dictionary<long, string>();
+        foreach (string requestedName in requested)
+        {
+            foreach (byte[] namePattern in new[]
+            {
+                Encoding.Unicode.GetBytes(requestedName + "\0"),
+                Encoding.UTF8.GetBytes(requestedName + "\0"),
+            })
+            {
+                foreach (long nameAddress in memory.FindPattern(
+                             namePattern,
+                             writableOnly: false,
+                             maximumResults: 64))
+                {
+                    namesByAddress.TryAdd(nameAddress, requestedName);
                 }
             }
         }
-        return null;
+        if (namesByAddress.Count == 0)
+        {
+            return new Dictionary<string, ResolvedHashLinkType>();
+        }
+
+        var typeObjectNames = new Dictionary<long, string>();
+        foreach (PointerReference reference in memory.FindPointerReferences(
+                     namesByAddress.Keys.ToHashSet(),
+                     writableOnly: false,
+                     maximumResults: 4096))
+        {
+            string requestedName = namesByAddress[reference.Target];
+            long typeObject = reference.Address - 16;
+            if (ValidateTypeObject(typeObject, requestedName))
+            {
+                typeObjectNames.TryAdd(typeObject, requestedName);
+            }
+        }
+        if (typeObjectNames.Count == 0)
+        {
+            return new Dictionary<string, ResolvedHashLinkType>();
+        }
+
+        var result = new Dictionary<string, ResolvedHashLinkType>(
+            StringComparer.Ordinal);
+        foreach (PointerReference reference in memory.FindPointerReferences(
+                     typeObjectNames.Keys.ToHashSet(),
+                     writableOnly: false,
+                     maximumResults: 4096))
+        {
+            long typeAddress = reference.Address - 8;
+            ResolvedHashLinkType? resolved = ResolveByAddress(typeAddress);
+            string requestedName = typeObjectNames[reference.Target];
+            if (resolved is not null
+                && string.Equals(
+                    resolved.Name,
+                    requestedName,
+                    StringComparison.Ordinal))
+            {
+                result.TryAdd(requestedName, resolved);
+            }
+        }
+        return result;
     }
 
     public ResolvedHashLinkType? ResolveByAddress(long typeAddress)

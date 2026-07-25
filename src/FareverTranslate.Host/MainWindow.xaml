@@ -13,6 +13,7 @@
         ShowInTaskbar="False"
         ShowActivated="False"
         Topmost="True"
+        WindowStartupLocation="CenterScreen"
         SourceInitialized="Window_SourceInitialized"
         Closing="Window_Closing">
   <Border x:Name="PanelBorder"

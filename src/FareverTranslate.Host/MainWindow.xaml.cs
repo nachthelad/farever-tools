@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     private bool calibrationMode;
     private bool hotKeyRegistered;
     private bool followingGame = true;
+    private bool readerInitializationStarted;
+    private bool readerInitializationComplete;
 
     internal MainWindow(
         HostArguments arguments,
@@ -70,6 +72,7 @@ public partial class MainWindow : Window
         {
             Loaded += (_, _) => SetCalibrationMode(enabled: true);
         }
+        Loaded += InitializeReader;
     }
 
     public ObservableCollection<MessageRowViewModel> Messages { get; } = new();
@@ -111,10 +114,13 @@ public partial class MainWindow : Window
         }
 
         UpdateGamePosition();
-        IReadOnlyList<ChatMessageSnapshot> snapshots =
-            reader.ReadRecent(settings.MaximumMessages);
-        ReaderState.Text = reader.Diagnostic;
-        ReconcileMessages(snapshots);
+        if (readerInitializationComplete)
+        {
+            IReadOnlyList<ChatMessageSnapshot> snapshots =
+                reader.ReadRecent(settings.MaximumMessages);
+            ReaderState.Text = reader.Diagnostic;
+            ReconcileMessages(snapshots);
+        }
     }
 
     private void UpdateGamePosition()
@@ -125,10 +131,9 @@ public partial class MainWindow : Window
                 out double scale,
                 out bool minimized))
         {
-            if (!calibrationMode)
-            {
-                Visibility = Visibility.Hidden;
-            }
+            Visibility = settings.PanelVisible
+                ? Visibility.Visible
+                : Visibility.Hidden;
             return;
         }
 
@@ -201,6 +206,30 @@ public partial class MainWindow : Window
         EmptyState.Visibility = Messages.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+    }
+
+    private async void InitializeReader(object sender, RoutedEventArgs e)
+    {
+        if (readerInitializationStarted)
+        {
+            return;
+        }
+        readerInitializationStarted = true;
+        ReaderState.Text = "Analizando el chat de Farever…";
+        try
+        {
+            await Task.Run(reader.Initialize);
+            logger.Info("hashlink_layout", reader.DescribeLayout());
+        }
+        catch (Exception exception)
+        {
+            logger.Error("reader_background_failed", exception);
+        }
+        finally
+        {
+            readerInitializationComplete = true;
+            ReaderState.Text = reader.Diagnostic;
+        }
     }
 
     private async void Translate_Click(object sender, RoutedEventArgs e)
@@ -359,7 +388,10 @@ public partial class MainWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         timer.Stop();
-        reader.Dispose();
+        if (readerInitializationComplete)
+        {
+            reader.Dispose();
+        }
         if (source is not null)
         {
             if (hotKeyRegistered)

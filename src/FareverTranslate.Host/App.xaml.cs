@@ -51,8 +51,6 @@ public partial class App : Application
             arguments.ProcessId,
             arguments.GameDirectory,
             logger);
-        reader.Initialize();
-        logger.Info("hashlink_layout", reader.DescribeLayout());
 
         httpClient = new HttpClient
         {
