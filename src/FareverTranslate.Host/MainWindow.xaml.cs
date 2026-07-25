@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer timer;
     private readonly ForegroundKeyToggle panelToggle = new();
     private readonly Dictionary<string, MessageRowViewModel> knownRows = new();
+    private readonly DismissedChatMessages dismissedMessages = new();
     private AppSettings settings;
     private bool calibrationMode;
     private bool followingGame = true;
@@ -195,8 +196,11 @@ public partial class MainWindow : Window
     private void ReconcileMessages(
         IReadOnlyList<ChatMessageSnapshot> snapshots)
     {
-        var current = new List<MessageRowViewModel>(snapshots.Count);
-        foreach (ChatMessageSnapshot snapshot in snapshots)
+        IReadOnlyList<ChatMessageSnapshot> visibleSnapshots =
+            dismissedMessages.Filter(snapshots);
+        var current =
+            new List<MessageRowViewModel>(visibleSnapshots.Count);
+        foreach (ChatMessageSnapshot snapshot in visibleSnapshots)
         {
             if (!knownRows.TryGetValue(
                     snapshot.Identity,
@@ -231,16 +235,16 @@ public partial class MainWindow : Window
             }
         }
 
-        var activeIdentities = snapshots.Select(item => item.Identity).ToHashSet();
+        var activeIdentities = visibleSnapshots
+            .Select(item => item.Identity)
+            .ToHashSet();
         foreach (string stale in knownRows.Keys
                      .Where(identity => !activeIdentities.Contains(identity))
                      .ToArray())
         {
             knownRows.Remove(stale);
         }
-        EmptyState.Visibility = Messages.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        RefreshEmptyState();
     }
 
     private async void InitializeReader(object sender, RoutedEventArgs e)
@@ -323,6 +327,26 @@ public partial class MainWindow : Window
         {
             row.Translating = false;
         }
+    }
+
+    private void Dismiss_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: MessageRowViewModel row })
+        {
+            return;
+        }
+
+        dismissedMessages.Dismiss(row.Identity);
+        knownRows.Remove(row.Identity);
+        Messages.Remove(row);
+        RefreshEmptyState();
+    }
+
+    private void RefreshEmptyState()
+    {
+        EmptyState.Visibility = Messages.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void ApiKey_Click(object sender, RoutedEventArgs e) =>

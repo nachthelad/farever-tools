@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,6 +12,7 @@ using FareverTranslate.Core.Memory;
 using FareverTranslate.Core.Models;
 using FareverTranslate.Core.Security;
 using FareverTranslate.Core.Translation;
+using FareverTranslate.Host;
 using FareverTranslate.Tests;
 
 if (args.Length == 3 && args[0] == "--proxy-case")
@@ -27,6 +30,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Google errores y reintentos", TestGoogleErrors),
     ("DPAPI credencial y caché", TestProtectedStorage),
     ("Posición DPI", TestOverlayPlacement),
+    ("Filtrado de mensajes descartados", TestDismissedMessages),
+    ("Fila compacta y altura", TestCompactMessageRow),
     ("Proxy y cinco exports", TestProxy),
 };
 
@@ -338,6 +343,87 @@ static Task TestOverlayPlacement()
             Math.Abs(placement.Left - 124) < 0.01
             && Math.Abs(placement.Top - 300) < 0.01,
             $"Posición incorrecta a {scale:P0}.");
+    }
+    return Task.CompletedTask;
+}
+
+static Task TestDismissedMessages()
+{
+    var dismissed = new DismissedChatMessages();
+    var first = new ChatMessageSnapshot(
+        "entry-1",
+        "Titan",
+        "All",
+        "hola como estas guapo",
+        false,
+        false);
+    var future = first with { Identity = "entry-2" };
+
+    dismissed.Dismiss(first.Identity);
+    Assert(
+        dismissed.Filter([]).Count == 0
+        && dismissed.Filter([first]).Count == 0,
+        "Una muestra vacía restauró una aparición descartada.");
+    IReadOnlyList<ChatMessageSnapshot> visible =
+        dismissed.Filter([first, future]);
+    Assert(
+        dismissed.Count == 1
+        && visible.Count == 1
+        && visible[0].Identity == future.Identity,
+        "Descartar una aparición ocultó un mensaje futuro o restauró la anterior.");
+    return Task.CompletedTask;
+}
+
+static Task TestCompactMessageRow()
+{
+    var snapshot = new ChatMessageSnapshot(
+        "entry-1",
+        "Titan",
+        "All",
+        "olá",
+        false,
+        false);
+    var row = new MessageRowViewModel(snapshot);
+    Assert(
+        row.ButtonText == "T"
+        && row.CanTranslate
+        && !row.HasTranslation
+        && !row.HasStatus,
+        "La fila compacta no inició en su estado mínimo.");
+
+    row.Translating = true;
+    Assert(
+        row.ButtonText == "…" && !row.CanTranslate,
+        "La acción compacta no reflejó la traducción en curso.");
+
+    row.Status = "Error temporal.";
+    Assert(row.HasStatus, "La fila no expuso su estado de error.");
+
+    string root = Path.Combine(
+        Path.GetTempPath(),
+        "FareverTranslate.Settings.Tests",
+        Guid.NewGuid().ToString("N"));
+    try
+    {
+        var paths = new AppPaths(root);
+        paths.EnsureCreated();
+        File.WriteAllText(
+            paths.SettingsFile,
+            """{"PanelHeight":100}""");
+        AppSettings settings = new SettingsStore(paths).Load();
+        Assert(
+            settings.PanelHeight == 150,
+            "La configuración no aceptó la nueva altura mínima.");
+        Assert(
+            new AppSettings().PanelHeight == 200,
+            "La altura predeterminada nueva no es compacta.");
+    }
+    finally
+    {
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
     return Task.CompletedTask;
 }

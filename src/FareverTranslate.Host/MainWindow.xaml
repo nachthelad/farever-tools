@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Farever Translate"
         Width="360"
-        Height="280"
+        Height="200"
         MinWidth="320"
-        MinHeight="220"
+        MinHeight="150"
         MaxWidth="620"
         MaxHeight="720"
         WindowStyle="None"
@@ -72,46 +72,61 @@
                  Text="Arrastrá desde el título y tocá Listo al terminar."
                  Visibility="Collapsed" />
       <ScrollViewer Grid.Row="2"
-                    Margin="0,8,0,0"
+                    Margin="0,6,0,0"
                     VerticalScrollBarVisibility="Auto"
                     HorizontalScrollBarVisibility="Disabled">
         <ItemsControl ItemsSource="{Binding Messages}">
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Border Background="{StaticResource CardBrush}"
-                      CornerRadius="9"
-                      Padding="10"
-                      Margin="0,0,0,7">
-                <StackPanel>
-                  <DockPanel>
-                    <TextBlock Text="{Binding Sender}"
-                               Foreground="#FFBFDBFE"
-                               FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding Channel, StringFormat= · {0}}"
-                               Foreground="{StaticResource MutedBrush}" />
-                  </DockPanel>
-                  <TextBlock Text="{Binding Original}"
-                             Foreground="White"
-                             TextWrapping="Wrap"
-                             MaxHeight="44"
-                             Margin="0,4,0,5" />
-                  <TextBlock Text="{Binding Translation}"
-                             Foreground="#FFBBF7D0"
-                             TextWrapping="Wrap"
-                             Margin="0,1,0,4" />
-                  <DockPanel LastChildFill="True">
-                    <Button Content="{Binding ButtonText}"
-                            IsEnabled="{Binding CanTranslate}"
-                            Tag="{Binding}"
-                            HorizontalAlignment="Left"
-                            Click="Translate_Click" />
+              <Border BorderBrush="#FF3A4352"
+                      BorderThickness="0,0,0,1"
+                      Padding="2,7,2,7">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="20" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,8,0">
+                    <DockPanel>
+                      <TextBlock Text="{Binding Sender}"
+                                 Foreground="#FFBFDBFE"
+                                 FontSize="11"
+                                 FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Channel, StringFormat= · {0}}"
+                                 Foreground="{StaticResource MutedBrush}"
+                                 FontSize="11" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding Original}"
+                               Foreground="White"
+                               TextWrapping="Wrap"
+                               MaxHeight="40"
+                               Margin="0,2,0,0" />
+                    <TextBlock Text="{Binding Translation}"
+                               Foreground="#FFBBF7D0"
+                               TextWrapping="Wrap"
+                               Margin="0,2,0,0"
+                               Visibility="{Binding HasTranslation, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock Text="{Binding Status}"
                                Foreground="#FFFCA5A5"
-                               VerticalAlignment="Center"
-                               Margin="9,0,0,0"
-                               TextWrapping="Wrap" />
-                  </DockPanel>
-                </StackPanel>
+                               TextWrapping="Wrap"
+                               Margin="0,2,0,0"
+                               Visibility="{Binding HasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1">
+                    <Button Content="×"
+                            Style="{StaticResource CompactDismissButton}"
+                            Tag="{Binding}"
+                            ToolTip="Descartar mensaje"
+                            Click="Dismiss_Click" />
+                    <Button Content="{Binding ButtonText}"
+                            Style="{StaticResource CompactActionButton}"
+                            IsEnabled="{Binding CanTranslate}"
+                            Tag="{Binding}"
+                            ToolTip="Traducir"
+                            Margin="0,2,0,0"
+                            Click="Translate_Click" />
+                  </StackPanel>
+                </Grid>
               </Border>
             </DataTemplate>
           </ItemsControl.ItemTemplate>

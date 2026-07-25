@@ -38,8 +38,10 @@ public sealed class MessageRowViewModel : INotifyPropertyChanged
         {
             status = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(HasStatus));
         }
     }
+    public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
     public bool Translating
     {
         get => translating;
@@ -52,7 +54,7 @@ public sealed class MessageRowViewModel : INotifyPropertyChanged
         }
     }
     public bool CanTranslate => !Translating;
-    public string ButtonText => Translating ? "Traduciendo…" : "Traducir";
+    public string ButtonText => Translating ? "…" : "T";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
