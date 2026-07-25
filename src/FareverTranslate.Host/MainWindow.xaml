@@ -69,7 +69,7 @@
                  Grid.Row="1"
                  Margin="0,9,0,4"
                  Foreground="#FFFBBF24"
-                 Text="Arrastrá desde el título y tocá Listo al terminar."
+                 Text="Presioná Alt, arrastrá desde el título y tocá Listo."
                  Visibility="Collapsed" />
       <ScrollViewer Grid.Row="2"
                     Margin="0,6,0,0"
@@ -150,6 +150,7 @@
                   Width="16"
                   Height="16"
                   Margin="0,0,-7,-7"
+                  PreviewMouseLeftButtonDown="ResizeGrip_MouseLeftButtonDown"
                   Panel.ZIndex="10" />
     </Grid>
   </Border>

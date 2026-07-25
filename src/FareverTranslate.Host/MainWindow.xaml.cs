@@ -5,6 +5,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using FareverTranslate.Core.Configuration;
 using FareverTranslate.Core.Diagnostics;
@@ -26,7 +27,10 @@ public partial class MainWindow : Window
     private readonly AppLogger logger;
     private readonly GameWindowTracker gameWindow;
     private readonly DispatcherTimer timer;
+    private readonly DispatcherTimer altTimer;
     private readonly ForegroundKeyToggle panelToggle = new();
+    private readonly AltInteractionToggle altInteraction = new();
+    private readonly MousePassThroughController mousePassThrough;
     private readonly Dictionary<string, MessageRowViewModel> knownRows = new();
     private readonly DismissedChatMessages dismissedMessages = new();
     private AppSettings settings;
@@ -37,7 +41,9 @@ public partial class MainWindow : Window
     private bool readerSampleRunning;
     private bool closing;
     private bool initialCalibrationPending;
+    private bool mouseSafetyFault;
     private IntPtr gameWindowHandle;
+    private HwndSource? windowSource;
 
     internal MainWindow(
         HostArguments arguments,
@@ -63,6 +69,10 @@ public partial class MainWindow : Window
         initialCalibrationPending = firstRun;
         gameWindow = new GameWindowTracker(arguments.ProcessId);
         DataContext = this;
+        mousePassThrough = new MousePassThroughController(
+            clickThrough =>
+                NativeWindow.SetClickThrough(this, clickThrough),
+            hitTesting => IsHitTestVisible = hitTesting);
 
         timer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(100),
@@ -70,6 +80,11 @@ public partial class MainWindow : Window
             Timer_Tick,
             Dispatcher);
         timer.Start();
+        altTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(20),
+            DispatcherPriority.Input,
+            AltTimer_Tick,
+            Dispatcher);
         ReaderState.Text = reader.Diagnostic;
         Visibility = Visibility.Hidden;
         Loaded += InitializeReader;
@@ -79,7 +94,11 @@ public partial class MainWindow : Window
 
     private void Window_SourceInitialized(object? sender, EventArgs e)
     {
-        NativeWindow.SetNoActivate(this, enabled: true);
+        IntPtr handle = new WindowInteropHelper(this).Handle;
+        windowSource = HwndSource.FromHwnd(handle);
+        windowSource?.AddHook(WindowMessageHook);
+        ApplyInteractionMode(interactive: false);
+        altTimer.Start();
     }
 
     private void Timer_Tick(object? sender, EventArgs e)
@@ -112,6 +131,59 @@ public partial class MainWindow : Window
         {
             _ = SampleReaderAsync();
         }
+    }
+
+    private void AltTimer_Tick(object? sender, EventArgs e)
+    {
+        bool targetReady = readerInitializationComplete
+            && reader.Status == ChatReaderStatus.Ready
+            && gameWindowHandle != IntPtr.Zero
+            && !NativeWindow.IsIconic(gameWindowHandle)
+            && gameWindow.IsForeground;
+        AltInteractionChange change = altInteraction.Update(
+            new AltInteractionSample(
+                NativeWindow.IsAltDown(),
+                NativeWindow.IsDisqualifyingAltChordDown(),
+                targetReady));
+        if (change != AltInteractionChange.None)
+        {
+            ApplyInteractionMode(altInteraction.IsInteractive);
+        }
+    }
+
+    private IntPtr WindowMessageHook(
+        IntPtr window,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam,
+        ref bool handled)
+    {
+        if (message == NativeWindow.WmMouseActivate)
+        {
+            handled = true;
+            return new IntPtr(NativeWindow.MaNoActivate);
+        }
+        return IntPtr.Zero;
+    }
+
+    private void ApplyInteractionMode(bool interactive)
+    {
+        if (mouseSafetyFault)
+        {
+            IsHitTestVisible = false;
+            return;
+        }
+        if (mousePassThrough.TrySetInteractive(interactive))
+        {
+            return;
+        }
+
+        mouseSafetyFault = true;
+        logger.Error(
+            "mouse_passthrough_failed",
+            new InvalidOperationException(
+                "Windows no confirmó el modo atravesable del panel."));
+        ApplyVisibility(false);
     }
 
     private async Task SampleReaderAsync()
@@ -153,7 +225,8 @@ public partial class MainWindow : Window
                 out double scale,
                 out bool minimized))
         {
-            ApplyVisibility(calibrationMode && settings.PanelVisible);
+            gameWindowHandle = IntPtr.Zero;
+            ApplyVisibility(false);
             return;
         }
 
@@ -165,7 +238,11 @@ public partial class MainWindow : Window
 
         bool inWorld = readerInitializationComplete
             && reader.Status == ChatReaderStatus.Ready;
-        if (initialCalibrationPending && inWorld && !minimized)
+        bool gameIsForeground = gameWindow.IsForeground;
+        if (initialCalibrationPending
+            && inWorld
+            && !minimized
+            && gameIsForeground)
         {
             initialCalibrationPending = false;
             SetCalibrationMode(enabled: true);
@@ -174,8 +251,9 @@ public partial class MainWindow : Window
 
         bool shouldShow = settings.PanelVisible
             && !minimized
-            && (calibrationMode
-                || (inWorld && gameWindow.IsForeground));
+            && inWorld
+            && gameIsForeground
+            && !mouseSafetyFault;
         ApplyVisibility(shouldShow);
         if (!shouldShow || !followingGame || calibrationMode)
         {
@@ -374,13 +452,7 @@ public partial class MainWindow : Window
         PanelBorder.BorderBrush = calibrationMode
             ? System.Windows.Media.Brushes.Gold
             : (System.Windows.Media.Brush)FindResource("MutedBrush");
-        NativeWindow.SetNoActivate(this, enabled: !calibrationMode);
-        if (enabled)
-        {
-            Activate();
-            Focus();
-        }
-        else
+        if (!enabled)
         {
             SaveCalibration();
             followingGame = true;
@@ -394,7 +466,18 @@ public partial class MainWindow : Window
     {
         if (calibrationMode && e.LeftButton == MouseButtonState.Pressed)
         {
-            DragMove();
+            NativeWindow.BeginMove(this);
+        }
+    }
+
+    private void ResizeGrip_MouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (calibrationMode && e.LeftButton == MouseButtonState.Pressed)
+        {
+            e.Handled = true;
+            NativeWindow.BeginBottomRightResize(this);
         }
     }
 
@@ -444,6 +527,7 @@ public partial class MainWindow : Window
 
     private void ApplyVisibility(bool visible)
     {
+        visible &= !mouseSafetyFault;
         if (visible)
         {
             Visibility = Visibility.Visible;
@@ -460,6 +544,8 @@ public partial class MainWindow : Window
     {
         closing = true;
         timer.Stop();
+        altTimer.Stop();
+        windowSource?.RemoveHook(WindowMessageHook);
         settings = settings with
         {
             PanelWidth = ActualWidth,

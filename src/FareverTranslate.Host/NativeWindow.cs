@@ -9,7 +9,19 @@ internal static class NativeWindow
     internal const int GwlHwndParent = -8;
     internal const long WsExNoActivate = 0x08000000L;
     internal const long WsExToolWindow = 0x00000080L;
+    internal const long WsExTransparent = 0x00000020L;
+    internal const int WmMouseActivate = 0x0021;
+    internal const int MaNoActivate = 3;
     private const int VirtualKeyF6 = 0x75;
+    private const int VirtualKeyAlt = 0x12;
+    private const int VirtualKeyControl = 0x11;
+    private const int VirtualKeyShift = 0x10;
+    private const int VirtualKeyTab = 0x09;
+    private const int VirtualKeyEnter = 0x0D;
+    private const int VirtualKeyF4 = 0x73;
+    private const int WmNcLeftButtonDown = 0x00A1;
+    private const int HtCaption = 2;
+    private const int HtBottomRight = 17;
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
@@ -63,6 +75,17 @@ internal static class NativeWindow
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessage(
+        IntPtr window,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(
         IntPtr window,
         IntPtr insertAfter,
@@ -73,24 +96,54 @@ internal static class NativeWindow
         uint flags);
 
     internal static bool IsF6Down() =>
-        (GetAsyncKeyState(VirtualKeyF6) & 0x8000) != 0;
+        IsKeyDown(VirtualKeyF6);
 
-    internal static void SetNoActivate(
+    internal static bool IsAltDown() =>
+        IsKeyDown(VirtualKeyAlt);
+
+    internal static bool IsDisqualifyingAltChordDown() =>
+        IsDisqualifyingAltChord(
+            IsKeyDown(VirtualKeyControl),
+            IsKeyDown(VirtualKeyShift),
+            IsKeyDown(VirtualKeyTab),
+            IsKeyDown(VirtualKeyEnter),
+            IsKeyDown(VirtualKeyF4));
+
+    internal static bool IsDisqualifyingAltChord(
+        bool controlDown,
+        bool shiftDown,
+        bool tabDown,
+        bool enterDown,
+        bool f4Down) =>
+        controlDown
+        || shiftDown
+        || tabDown
+        || enterDown
+        || f4Down;
+
+    internal static bool SetClickThrough(
         System.Windows.Window window,
         bool enabled)
     {
         IntPtr handle = new WindowInteropHelper(window).Handle;
         if (handle == IntPtr.Zero)
         {
-            return;
+            return false;
         }
         long style = GetWindowLongPtr(handle, GwlExStyle).ToInt64();
-        style |= WsExToolWindow;
+        style |= WsExToolWindow | WsExNoActivate;
         style = enabled
-            ? style | WsExNoActivate
-            : style & ~WsExNoActivate;
+            ? style | WsExTransparent
+            : style & ~WsExTransparent;
         SetWindowLongPtr(handle, GwlExStyle, new IntPtr(style));
         RefreshFrame(handle);
+        long confirmedStyle =
+            GetWindowLongPtr(handle, GwlExStyle).ToInt64();
+        long required = WsExToolWindow | WsExNoActivate;
+        bool hasRequired = (confirmedStyle & required) == required;
+        bool hasTransparent =
+            (confirmedStyle & WsExTransparent) != 0;
+        return hasRequired && hasTransparent == enabled;
     }
 
     internal static void SetOwner(
@@ -105,6 +158,33 @@ internal static class NativeWindow
         SetWindowLongPtr(handle, GwlHwndParent, owner);
         RefreshFrame(handle);
     }
+
+    internal static void BeginMove(System.Windows.Window window) =>
+        BeginNonClientAction(window, HtCaption);
+
+    internal static void BeginBottomRightResize(
+        System.Windows.Window window) =>
+        BeginNonClientAction(window, HtBottomRight);
+
+    private static void BeginNonClientAction(
+        System.Windows.Window window,
+        int hitTest)
+    {
+        IntPtr handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+        ReleaseCapture();
+        SendMessage(
+            handle,
+            WmNcLeftButtonDown,
+            new IntPtr(hitTest),
+            IntPtr.Zero);
+    }
+
+    private static bool IsKeyDown(int virtualKey) =>
+        (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 
     private static void RefreshFrame(IntPtr handle)
     {

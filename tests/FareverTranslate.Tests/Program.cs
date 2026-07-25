@@ -6,6 +6,9 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Windows;
+using System.Windows.Interop;
 using FareverTranslate.Core.Configuration;
 using FareverTranslate.Core.Diagnostics;
 using FareverTranslate.Core.Memory;
@@ -25,6 +28,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("HashLink sintético", TestSyntheticHashLink),
     ("Watchdog del chat", TestChatRecoveryWatchdog),
     ("Toggle F6 por flanco y foco", TestForegroundKeyToggle),
+    ("Interacción por Alt", TestAltInteractionToggle),
+    ("Seguridad click-through", TestMousePassThroughController),
+    ("Estilos nativos del overlay", TestNativeWindowStyles),
     ("Build desconocido", TestUnsupportedBuild),
     ("Google success/autodetect", TestGoogleSuccess),
     ("Google errores y reintentos", TestGoogleErrors),
@@ -165,6 +171,187 @@ static Task TestForegroundKeyToggle()
     Assert(
         !toggle.Update(isDown: true, targetIsForeground: true),
         "Mantener F6 alternó repetidamente.");
+    return Task.CompletedTask;
+}
+
+static Task TestAltInteractionToggle()
+{
+    var toggle = new AltInteractionToggle();
+    Assert(
+        toggle.Update(new AltInteractionSample(true, false, true))
+            == AltInteractionChange.None
+        && !toggle.IsInteractive,
+        "Alt ya presionado al iniciar habilitó la ventana.");
+    Assert(
+        toggle.Update(new AltInteractionSample(false, false, true))
+            == AltInteractionChange.None,
+        "La liberación inicial de Alt alternó la ventana.");
+
+    Assert(
+        toggle.Update(new AltInteractionSample(true, false, true))
+            == AltInteractionChange.None
+        && toggle.Update(new AltInteractionSample(true, false, true))
+            == AltInteractionChange.None,
+        "Mantener Alt produjo una repetición.");
+    Assert(
+        toggle.Update(new AltInteractionSample(false, false, true))
+            == AltInteractionChange.BecameInteractive
+        && toggle.IsInteractive,
+        "Alt sola no habilitó la interacción al soltarse.");
+
+    Assert(
+        toggle.Update(new AltInteractionSample(true, false, true))
+            == AltInteractionChange.None
+        && toggle.Update(new AltInteractionSample(false, false, true))
+            == AltInteractionChange.BecamePassive
+        && !toggle.IsInteractive,
+        "El segundo Alt no restauró el modo atravesable.");
+
+    Assert(
+        toggle.Update(new AltInteractionSample(true, false, true))
+            == AltInteractionChange.None
+        && toggle.Update(new AltInteractionSample(true, true, true))
+            == AltInteractionChange.None
+        && toggle.Update(new AltInteractionSample(false, false, true))
+            == AltInteractionChange.None
+        && !toggle.IsInteractive,
+        "Una combinación iniciada después de Alt alternó la ventana.");
+
+    Assert(
+        NativeWindow.IsDisqualifyingAltChord(true, false, false, false, false)
+        && NativeWindow.IsDisqualifyingAltChord(false, true, false, false, false)
+        && NativeWindow.IsDisqualifyingAltChord(false, false, true, false, false)
+        && NativeWindow.IsDisqualifyingAltChord(false, false, false, true, false)
+        && NativeWindow.IsDisqualifyingAltChord(false, false, false, false, true)
+        && !NativeWindow.IsDisqualifyingAltChord(
+            false,
+            false,
+            false,
+            false,
+            false),
+        "Ctrl/AltGr, Shift, Tab, Enter o F4 no se clasificaron correctamente.");
+
+    toggle.Update(new AltInteractionSample(true, false, true));
+    toggle.Update(new AltInteractionSample(false, false, true));
+    Assert(toggle.IsInteractive, "No se preparó el reset por foco.");
+    Assert(
+        toggle.Update(new AltInteractionSample(false, false, false))
+            == AltInteractionChange.BecamePassive
+        && !toggle.IsInteractive,
+        "Perder foco/mundo listo no restauró el modo pasivo.");
+
+    var movementCompatible = new AltInteractionToggle();
+    movementCompatible.Update(new AltInteractionSample(false, false, true));
+    movementCompatible.Update(new AltInteractionSample(true, false, true));
+    Assert(
+        movementCompatible.Update(
+            new AltInteractionSample(false, false, true))
+            == AltInteractionChange.BecameInteractive,
+        "Una Alt válida junto a movimiento fue descartada.");
+    return Task.CompletedTask;
+}
+
+static Task TestMousePassThroughController()
+{
+    var nativeCalls = new List<bool>();
+    var hitTesting = new List<bool>();
+    var controller = new MousePassThroughController(
+        clickThrough =>
+        {
+            nativeCalls.Add(clickThrough);
+            return true;
+        },
+        enabled => hitTesting.Add(enabled));
+
+    Assert(
+        controller.TrySetInteractive(interactive: false)
+        && nativeCalls.SequenceEqual([true])
+        && hitTesting.SequenceEqual([false]),
+        "El modo pasivo no aplicó ambas barreras.");
+    Assert(
+        controller.TrySetInteractive(interactive: true)
+        && nativeCalls.SequenceEqual([true, false])
+        && hitTesting.SequenceEqual([false, true]),
+        "El modo interactivo no retiró las barreras en orden seguro.");
+
+    int failedNativeCalls = 0;
+    bool? failedHitTesting = null;
+    var failing = new MousePassThroughController(
+        _ =>
+        {
+            failedNativeCalls++;
+            return false;
+        },
+        enabled => failedHitTesting = enabled);
+    Assert(
+        !failing.TrySetInteractive(interactive: false)
+        && failing.SafetyFault
+        && failedHitTesting == false,
+        "Un fallo nativo no activó el cierre seguro.");
+    Assert(
+        !failing.TrySetInteractive(interactive: true)
+        && failedNativeCalls == 1
+        && failedHitTesting == false,
+        "El controlador volvió a habilitar entrada después de un fallo.");
+    return Task.CompletedTask;
+}
+
+static Task TestNativeWindowStyles()
+{
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var window = new Window
+            {
+                ShowInTaskbar = false,
+                ShowActivated = false,
+            };
+            IntPtr handle = new WindowInteropHelper(window).EnsureHandle();
+            Assert(
+                NativeWindow.SetClickThrough(window, enabled: true),
+                "Windows no confirmó WS_EX_TRANSPARENT.");
+            long passiveStyle =
+                NativeWindow.GetWindowLongPtr(
+                    handle,
+                    NativeWindow.GwlExStyle).ToInt64();
+            long required =
+                NativeWindow.WsExTransparent
+                | NativeWindow.WsExNoActivate
+                | NativeWindow.WsExToolWindow;
+            Assert(
+                (passiveStyle & required) == required,
+                "El modo pasivo perdió estilos obligatorios.");
+
+            Assert(
+                NativeWindow.SetClickThrough(window, enabled: false),
+                "Windows no retiró WS_EX_TRANSPARENT.");
+            long interactiveStyle =
+                NativeWindow.GetWindowLongPtr(
+                    handle,
+                    NativeWindow.GwlExStyle).ToInt64();
+            Assert(
+                (interactiveStyle & NativeWindow.WsExTransparent) == 0
+                && (interactiveStyle & NativeWindow.WsExNoActivate) != 0
+                && (interactiveStyle & NativeWindow.WsExToolWindow) != 0,
+                "El modo interactivo alteró NOACTIVATE o TOOLWINDOW.");
+            window.Close();
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    thread.Join();
+    if (failure is not null)
+    {
+        throw new InvalidOperationException(
+            "Falló la validación nativa del overlay.",
+            failure);
+    }
     return Task.CompletedTask;
 }
 

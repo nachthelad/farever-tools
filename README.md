@@ -68,10 +68,14 @@ original cuando todos los hashes coinciden.
 - Pulsar **Traducir** en una línea; no hay traducción automática.
 - El panel aparece únicamente dentro del mundo y mientras Farever está en
   primer plano. Se oculta en cargas, minimizado y al cambiar de aplicación.
+- El panel deja pasar el mouse hacia Farever por defecto. Pulsar y soltar
+  `Alt` sola habilita sus controles; pulsarla nuevamente devuelve el mouse al
+  juego.
 - Si el historial deja de producir mensajes, el lector refresca sus
   referencias y vuelve a buscar el chat automáticamente con espera progresiva.
-- Usar **Calibrar** para arrastrar o redimensionar el panel junto al chat. El
-  tamaño y la posición quedan guardados.
+- Después de habilitar la interacción con `Alt`, usar **Calibrar** para
+  arrastrar o redimensionar el panel junto al chat. El tamaño y la posición
+  quedan guardados.
 - Alternar el panel con `F6` mientras Farever está en primer plano.
 
 Consulta [Google Cloud](docs/GOOGLE_CLOUD.md), los
