@@ -8,7 +8,10 @@ Primera beta pública del traductor manual de chat para Farever.
 - Uso personal y bajo responsabilidad del usuario.
 - Requiere Windows x64 y
   [.NET 8 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0/runtime).
-- Requiere Farever Minimap & DPS v1.2.3 o v1.2.4 ya instalado.
+- Funciona sin minimapa.
+- Si Farever Minimap & DPS v1.2.3 o v1.2.4 ya está instalado, conserva y
+  encadena ambos componentes.
+- Un `dinput8.dll` desconocido se rechaza sin modificarlo.
 - Farever debe estar cerrado.
 
 ## Instalar

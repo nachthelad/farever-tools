@@ -66,10 +66,29 @@ $rollbackPath = Join-Path $resolvedGame (
 
 function New-InstalledManifest {
     param(
-        [string]$MinimapHash,
-        [string]$MinimapVersion,
+        [Parameter(Mandatory)]
+        [ValidateSet('Standalone', 'ChainedMinimap')]
+        [string]$InstallMode,
+        [AllowNull()]$MinimapHash,
+        [AllowNull()]$MinimapVersion,
         [string]$InstalledAtUtc
     )
+
+    $originalHashValue = $null
+    $minimapVersionValue = $null
+    $chainedFile = $null
+    $backupFile = $null
+    if ($InstallMode -eq 'ChainedMinimap') {
+        if ([string]::IsNullOrWhiteSpace([string]$MinimapHash) -or
+            [string]::IsNullOrWhiteSpace([string]$MinimapVersion)) {
+            throw 'Faltan datos del minimapa encadenado.'
+        }
+        $originalHashValue = [string]$MinimapHash
+        $minimapVersionValue = [string]$MinimapVersion
+        $chainedFile = 'farever-minimap.dll'
+        $backupFile =
+            'FareverTranslate.Backup\dinput8.original.dll'
+    }
 
     $files = foreach ($name in $payloadNames) {
         [ordered]@{
@@ -78,15 +97,16 @@ function New-InstalledManifest {
         }
     }
     return [ordered]@{
-        FormatVersion = 2
+        FormatVersion = 3
+        InstallMode = $InstallMode
         ProductVersion = [string]$payloadManifest.ProductVersion
         InstalledAtUtc = $InstalledAtUtc
         UpdatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
         GameBuildSha256 = $gameBuildHash
-        MinimapVersion = $MinimapVersion
-        OriginalDinput8Sha256 = $MinimapHash
-        ChainedFile = 'farever-minimap.dll'
-        BackupFile = 'FareverTranslate.Backup\dinput8.original.dll'
+        MinimapVersion = $minimapVersionValue
+        OriginalDinput8Sha256 = $originalHashValue
+        ChainedFile = $chainedFile
+        BackupFile = $backupFile
         Files = @($files)
     }
 }
@@ -105,10 +125,26 @@ function Stage-Payload {
 }
 
 function Copy-StagedPayload {
+    param(
+        [switch]$NoReplace,
+        [AllowNull()]
+        [Collections.Generic.List[string]]$CopiedNames
+    )
+
     $count = 0
     foreach ($name in $payloadNames) {
-        Copy-Item -LiteralPath (Join-Path $stagePath $name) `
-            -Destination (Join-Path $resolvedGame $name) -Force
+        $source = Join-Path $stagePath $name
+        $destination = Join-Path $resolvedGame $name
+        if ($NoReplace) {
+            [IO.File]::Copy($source, $destination, $false)
+        }
+        else {
+            Copy-Item -LiteralPath $source `
+                -Destination $destination -Force
+        }
+        if ($null -ne $CopiedNames) {
+            $CopiedNames.Add($name)
+        }
         $count++
         if ($TestFailAfterReplacements -gt 0 -and
             $count -ge $TestFailAfterReplacements) {
@@ -129,12 +165,17 @@ try {
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         $installation =
             Read-ValidatedInstallation -GameDirectory $resolvedGame
-        $minimapVersion =
-            [string]$SupportedMinimapHashes[$installation.OriginalHash]
-        if ([string]::IsNullOrWhiteSpace($minimapVersion)) {
-            throw (
-                'La versión instalada del minimapa ya no está soportada. ' +
-                "Hash: $($installation.OriginalHash)")
+        $installMode = [string]$installation.InstallMode
+        $minimapVersion = $null
+        if ($installMode -eq 'ChainedMinimap') {
+            $minimapVersion =
+                [string]$SupportedMinimapHashes[
+                    $installation.OriginalHash]
+            if ([string]::IsNullOrWhiteSpace($minimapVersion)) {
+                throw (
+                    'La versión instalada del minimapa ya no está ' +
+                    "soportada. Hash: $($installation.OriginalHash)")
+            }
         }
 
         New-Item -ItemType Directory -Path $rollbackPath | Out-Null
@@ -158,6 +199,7 @@ try {
                 $installedAt = [DateTimeOffset]::UtcNow.ToString('O')
             }
             $newManifest = New-InstalledManifest `
+                -InstallMode $installMode `
                 -MinimapHash $installation.OriginalHash `
                 -MinimapVersion $minimapVersion `
                 -InstalledAtUtc $installedAt
@@ -204,37 +246,56 @@ try {
             Join-Path $resolvedGame 'FareverTranslate.Backup'
         $backupPath =
             Join-Path $backupDirectory 'dinput8.original.dll'
-        if (-not (Test-Path -LiteralPath $originalPath -PathType Leaf)) {
-            throw 'No se encontró el dinput8.dll del minimapa instalado.'
-        }
         if ((Test-Path -LiteralPath $chainedPath) -or
             (Test-Path -LiteralPath $backupDirectory)) {
             throw 'Hay restos de otra instalación; no se modificó nada.'
         }
+        foreach ($name in $payloadNames) {
+            if ($name -ne 'dinput8.dll' -and
+                (Test-Path -LiteralPath (
+                    Join-Path $resolvedGame $name))) {
+                throw (
+                    'Hay archivos de otra instalación sin manifiesto; ' +
+                    'no se modificó nada.')
+            }
+        }
 
-        $originalHash = Get-NormalizedHash $originalPath
-        $minimapVersion =
-            [string]$SupportedMinimapHashes[$originalHash]
-        if ([string]::IsNullOrWhiteSpace($minimapVersion)) {
-            throw (
-                'El dinput8.dll no es un minimapa compatible. ' +
-                "Hash encontrado: $originalHash")
+        $installMode = 'Standalone'
+        $originalHash = $null
+        $minimapVersion = $null
+        if (Test-Path -LiteralPath $originalPath -PathType Leaf) {
+            $originalHash = Get-NormalizedHash $originalPath
+            $minimapVersion =
+                [string]$SupportedMinimapHashes[$originalHash]
+            if ([string]::IsNullOrWhiteSpace($minimapVersion)) {
+                throw (
+                    'Ya existe un dinput8.dll desconocido; no se ' +
+                    "modificó. Hash encontrado: $originalHash")
+            }
+            $installMode = 'ChainedMinimap'
         }
 
         $movedOriginal = $false
+        $copiedNames =
+            [Collections.Generic.List[string]]::new()
         try {
-            New-Item -ItemType Directory -Path $backupDirectory |
-                Out-Null
-            Copy-Item -LiteralPath $originalPath `
-                -Destination $backupPath
-            if ((Get-NormalizedHash $backupPath) -ne $originalHash) {
-                throw 'El respaldo no coincide byte por byte.'
+            if ($installMode -eq 'ChainedMinimap') {
+                New-Item -ItemType Directory -Path $backupDirectory |
+                    Out-Null
+                Copy-Item -LiteralPath $originalPath `
+                    -Destination $backupPath
+                if ((Get-NormalizedHash $backupPath) -ne
+                    $originalHash) {
+                    throw 'El respaldo no coincide byte por byte.'
+                }
+                Move-Item -LiteralPath $originalPath `
+                    -Destination $chainedPath
+                $movedOriginal = $true
             }
-            Move-Item -LiteralPath $originalPath `
-                -Destination $chainedPath
-            $movedOriginal = $true
-            Copy-StagedPayload
+            Copy-StagedPayload `
+                -NoReplace -CopiedNames $copiedNames
             $newManifest = New-InstalledManifest `
+                -InstallMode $installMode `
                 -MinimapHash $originalHash `
                 -MinimapVersion $minimapVersion `
                 -InstalledAtUtc ([DateTimeOffset]::UtcNow.ToString('O'))
@@ -242,9 +303,12 @@ try {
             $null = Read-ValidatedInstallation -GameDirectory $resolvedGame
         }
         catch {
-            foreach ($name in $payloadNames) {
+            foreach ($name in $copiedNames) {
                 $path = Join-Path $resolvedGame $name
-                if (Test-Path -LiteralPath $path) {
+                $stagedPath = Join-Path $stagePath $name
+                if ((Test-Path -LiteralPath $path -PathType Leaf) -and
+                    (Get-NormalizedHash $path) -eq
+                        (Get-NormalizedHash $stagedPath)) {
                     Remove-Item -LiteralPath $path -Force
                 }
             }
@@ -271,7 +335,7 @@ try {
         }
         Write-Host (
             "Farever Translate $($payloadManifest.ProductVersion) " +
-            'fue instalado correctamente.')
+            "fue instalado correctamente en modo $installMode.")
     }
 }
 finally {

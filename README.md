@@ -19,7 +19,8 @@ La captura usa nombres y mensajes completamente sintéticos.
 
 ## Qué hace
 
-- Conserva y encadena el minimapa/DPS ya instalado por el usuario.
+- Funciona de forma independiente o conserva y encadena un minimapa/DPS
+  compatible ya instalado por el usuario.
 - Lee Farever mediante `PROCESS_VM_READ`; no escribe memoria ni inyecta código.
 - Nunca automatiza teclas, movimientos o mensajes.
 - Envía a Google solamente la línea cuyo botón `T` se pulsa.
@@ -32,7 +33,7 @@ La captura usa nombres y mensajes completamente sintéticos.
 | Componente | Versión admitida |
 | --- | --- |
 | Farever | Windows x64, `hlboot.dat` SHA-256 `7C3CA4DD…E7A0` |
-| Farever Minimap & DPS | v1.2.3 o v1.2.4, identificadas por SHA-256 |
+| Farever Minimap & DPS (opcional) | v1.2.3 o v1.2.4, identificadas por SHA-256 |
 | Windows | Windows 10/11 x64 |
 | Pantalla | Ventana o ventana sin bordes |
 | Runtime | .NET 8 Desktop Runtime x64 |
@@ -42,8 +43,8 @@ actualización puede requerir una nueva versión del traductor.
 
 ## Instalar
 
-1. Instalá primero una versión compatible de
-   [Farever Minimap & DPS](https://github.com/ramisotti13-eng/farever-minimap/releases).
+1. Instalá
+   [.NET 8 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0/runtime).
 2. Descargá `FareverTranslate-v0.1.0-beta.1-win-x64.zip` desde
    [GitHub Releases](https://github.com/nachthelad/farever-translate/releases),
    extraelo en una carpeta aparte y no directamente sobre Farever.
@@ -53,26 +54,42 @@ El instalador busca Farever en las bibliotecas de Steam. Si no lo encuentra,
 permite seleccionar la carpeta que contiene `Farever.exe`. Antes de modificar
 nada verifica:
 
-- [.NET 8 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0/runtime);
 - el build de Farever;
-- la versión exacta del minimapa;
+- que un `dinput8.dll` existente sea un minimapa compatible;
 - que Farever esté cerrado.
 
-El minimapa se respalda byte por byte y se renombra como
-`farever-minimap.dll`. El proyecto no lo descarga ni lo redistribuye.
+Si no existe `dinput8.dll`, el traductor se instala de forma independiente y
+reenvía DirectInput al componente de Windows. Si encuentra un minimapa
+compatible, lo respalda byte por byte y lo renombra como
+`farever-minimap.dll` para que ambos funcionen. El proyecto no descarga ni
+redistribuye el minimapa.
+
+Si ya existe otro `dinput8.dll` desconocido, el instalador se detiene sin
+moverlo, sobrescribirlo ni eliminarlo.
+
+### Usar también el minimapa
+
+Farever Translate es compatible con
+[Farever Minimap & DPS](https://github.com/ramisotti13-eng/farever-minimap/releases)
+v1.2.3 y v1.2.4. Para pasar de una instalación independiente a una combinada:
+
+1. cerrá Farever y ejecutá `Desinstalar.cmd`;
+2. instalá una versión compatible del minimapa;
+3. ejecutá nuevamente `Instalar.cmd`.
 
 ### Actualizar
 
 Descargá la nueva release, extraela en otra carpeta y ejecutá su
 `Instalar.cmd`. La actualización verifica la instalación existente, prepara
-los archivos nuevos y vuelve automáticamente a la versión anterior si algo
-falla.
+los archivos nuevos, conserva el modo independiente o combinado y vuelve
+automáticamente a la versión anterior si algo falla.
 
 ### Desinstalar
 
 Cerrá Farever y ejecutá `Desinstalar.cmd` desde la carpeta extraída. Se
-verifican todos los hashes antes de restaurar el minimapa original. Si algún
-archivo fue modificado, la operación se detiene para no perder el respaldo.
+verifican todos los hashes antes de eliminar archivos propios. Si la
+instalación usa el minimapa, se restaura el DLL original byte por byte. Si
+algún archivo fue modificado, la operación se detiene para no perder datos.
 
 ## Usar
 
@@ -121,8 +138,11 @@ Consultá los [límites técnicos](docs/SECURITY.md) y la
   runtime de consola.
 - **No se encontró Farever:** seleccioná la carpeta que contiene
   `Farever.exe`.
-- **Minimapa no compatible:** reinstalá una versión indicada en la tabla; no
-  renombres otro mod como `dinput8.dll`.
+- **Ya existe un `dinput8.dll` desconocido:** puede pertenecer a otro mod.
+  El instalador no lo sobrescribe. Retirá ese mod siguiendo sus propias
+  instrucciones antes de instalar el traductor.
+- **Minimapa no compatible:** si querés usar ambos, reinstalá una versión
+  indicada en la tabla; no renombres otro mod como `dinput8.dll`.
 - **Versión de Farever no compatible:** no fuerces la instalación. Adjuntá el
   hash mostrado en un Issue.
 - **El panel no aparece:** entrá al mundo con un personaje y pulsá `F6`.

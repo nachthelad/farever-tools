@@ -9,10 +9,12 @@ IMPORTANTE
 
 - No extraigas los archivos directamente sobre la carpeta de Farever.
 - Farever debe estar cerrado al instalar, actualizar o desinstalar.
-- Primero instalá el minimapa compatible desde su repositorio:
-  https://github.com/ramisotti13-eng/farever-minimap/releases
 - Necesitás .NET 8 Desktop Runtime x64:
   https://dotnet.microsoft.com/en-us/download/dotnet/8.0/runtime
+- El minimapa no es obligatorio. Si ya tenés una versión compatible, el
+  instalador conservará ambos.
+- Si existe otro dinput8.dll desconocido, la instalación se cancela sin
+  modificarlo.
 
 INSTALAR O ACTUALIZAR
 ---------------------
@@ -33,8 +35,8 @@ USAR
 DESINSTALAR
 -----------
 
-Conservá esta carpeta extraída. Para restaurar el minimapa original, cerrá
-Farever y ejecutá Desinstalar.cmd.
+Conservá esta carpeta extraída. Cerrá Farever y ejecutá Desinstalar.cmd.
+Si usabas el minimapa, se restaurará byte por byte.
 
 AYUDA Y CÓDIGO FUENTE
 ---------------------

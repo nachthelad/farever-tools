@@ -19,10 +19,17 @@ if (Test-FareverRunningInDirectory -GameDirectory $resolvedGame) {
 $installation =
     Read-ValidatedInstallation -GameDirectory $resolvedGame
 $currentProxy = Join-Path $resolvedGame 'dinput8.dll'
+$installMode = [string]$installation.InstallMode
+$action = if ($installMode -eq 'ChainedMinimap') {
+    'Desinstalar Farever Translate y restaurar el minimapa'
+}
+else {
+    'Desinstalar Farever Translate'
+}
 
 if (-not $PSCmdlet.ShouldProcess(
         $resolvedGame,
-        'Desinstalar Farever Translate y restaurar el minimapa')) {
+        $action)) {
     return
 }
 
@@ -32,17 +39,30 @@ foreach ($name in $installation.InstalledNames) {
     }
 }
 Remove-Item -LiteralPath $currentProxy -Force
-Move-Item -LiteralPath $installation.ChainedPath `
-    -Destination $currentProxy
-if ((Get-NormalizedHash $currentProxy) -ne
-    $installation.OriginalHash) {
-    throw 'La restauración terminó con un hash inesperado. Conservá el respaldo.'
-}
 
-Remove-Item -LiteralPath $installation.BackupPath -Force
-$backupDirectory = Split-Path -Parent $installation.BackupPath
-if (@(Get-ChildItem -LiteralPath $backupDirectory -Force).Count -eq 0) {
-    Remove-Item -LiteralPath $backupDirectory
+if ($installMode -eq 'ChainedMinimap') {
+    Move-Item -LiteralPath $installation.ChainedPath `
+        -Destination $currentProxy
+    if ((Get-NormalizedHash $currentProxy) -ne
+        $installation.OriginalHash) {
+        throw (
+            'La restauración terminó con un hash inesperado. ' +
+            'Conservá el respaldo.')
+    }
+
+    Remove-Item -LiteralPath $installation.BackupPath -Force
+    $backupDirectory = Split-Path -Parent $installation.BackupPath
+    if (@(Get-ChildItem -LiteralPath $backupDirectory -Force).
+            Count -eq 0) {
+        Remove-Item -LiteralPath $backupDirectory
+    }
 }
 Remove-Item -LiteralPath $installation.ManifestPath -Force
-Write-Host 'Farever Translate fue desinstalado y el minimapa quedó restaurado.'
+if ($installMode -eq 'ChainedMinimap') {
+    Write-Host (
+        'Farever Translate fue desinstalado y el minimapa quedó ' +
+        'restaurado.')
+}
+else {
+    Write-Host 'Farever Translate fue desinstalado.'
+}

@@ -293,28 +293,78 @@ function Read-ValidatedInstallation {
     }
     $manifest =
         Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.FormatVersion -notin @(1, 2)) {
+    $formatVersion = [int]$manifest.FormatVersion
+    if ($formatVersion -notin @(1, 2, 3)) {
         throw 'El formato del manifiesto instalado no es compatible.'
     }
 
-    $expectedOriginal =
-        ([string]$manifest.OriginalDinput8Sha256).ToUpperInvariant()
-    if (-not (Test-Sha256 $expectedOriginal)) {
-        throw 'El hash original del manifiesto no es válido.'
+    if ($formatVersion -in @(1, 2)) {
+        $installMode = 'ChainedMinimap'
     }
-    if ([string]$manifest.ChainedFile -ne 'farever-minimap.dll' -or
-        [string]$manifest.BackupFile -ne
-            'FareverTranslate.Backup\dinput8.original.dll') {
-        throw 'Las rutas del manifiesto instalado son inesperadas.'
+    else {
+        $modeProperty =
+            $manifest.PSObject.Properties['InstallMode']
+        if ($null -eq $modeProperty -or
+            [string]$modeProperty.Value -notin @(
+                'Standalone',
+                'ChainedMinimap')) {
+            throw 'El modo del manifiesto instalado no es válido.'
+        }
+        $installMode = [string]$modeProperty.Value
     }
 
-    $chainedPath = Join-Path $GameDirectory 'farever-minimap.dll'
-    $backupPath = Join-Path $GameDirectory (
-        'FareverTranslate.Backup\dinput8.original.dll')
-    foreach ($path in @($chainedPath, $backupPath)) {
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
-            (Get-NormalizedHash $path) -ne $expectedOriginal) {
-            throw 'El minimapa o su respaldo fueron modificados.'
+    $expectedOriginal = $null
+    $chainedPath = $null
+    $backupPath = $null
+    if ($installMode -eq 'ChainedMinimap') {
+        $originalProperty =
+            $manifest.PSObject.Properties['OriginalDinput8Sha256']
+        if ($null -eq $originalProperty) {
+            throw 'El manifiesto no registra el hash original.'
+        }
+        $expectedOriginal =
+            ([string]$originalProperty.Value).ToUpperInvariant()
+        if (-not (Test-Sha256 $expectedOriginal)) {
+            throw 'El hash original del manifiesto no es válido.'
+        }
+
+        $chainedProperty =
+            $manifest.PSObject.Properties['ChainedFile']
+        $backupProperty =
+            $manifest.PSObject.Properties['BackupFile']
+        if ($null -eq $chainedProperty -or
+            $null -eq $backupProperty -or
+            [string]$chainedProperty.Value -ne
+                'farever-minimap.dll' -or
+            [string]$backupProperty.Value -ne
+                'FareverTranslate.Backup\dinput8.original.dll') {
+            throw 'Las rutas del manifiesto instalado son inesperadas.'
+        }
+
+        $chainedPath =
+            Join-Path $GameDirectory 'farever-minimap.dll'
+        $backupPath = Join-Path $GameDirectory (
+            'FareverTranslate.Backup\dinput8.original.dll')
+        foreach ($path in @($chainedPath, $backupPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+                (Get-NormalizedHash $path) -ne $expectedOriginal) {
+                throw 'El minimapa o su respaldo fueron modificados.'
+            }
+        }
+    }
+    else {
+        foreach ($name in @(
+                'MinimapVersion',
+                'OriginalDinput8Sha256',
+                'ChainedFile',
+                'BackupFile')) {
+            $property = $manifest.PSObject.Properties[$name]
+            if ($null -eq $property -or
+                $null -ne $property.Value) {
+                throw (
+                    'El manifiesto independiente contiene datos de ' +
+                    "encadenamiento: $name")
+            }
         }
     }
 
@@ -353,6 +403,7 @@ function Read-ValidatedInstallation {
     return [pscustomobject]@{
         Manifest = $manifest
         ManifestPath = $manifestPath
+        InstallMode = $installMode
         OriginalHash = $expectedOriginal
         ChainedPath = $chainedPath
         BackupPath = $backupPath

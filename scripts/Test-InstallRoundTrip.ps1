@@ -26,7 +26,8 @@ function New-FixtureGame {
     param(
         [Parameter(Mandatory)][string]$Path,
         [string]$MinimapContent = 'official minimap fixture',
-        [string]$BuildContent = 'supported hlboot fixture'
+        [string]$BuildContent = 'supported hlboot fixture',
+        [switch]$WithoutDinput
     )
 
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -34,8 +35,10 @@ function New-FixtureGame {
         -Content 'farever fixture'
     Write-FixtureFile -Path (Join-Path $Path 'hlboot.dat') `
         -Content $BuildContent
-    Write-FixtureFile -Path (Join-Path $Path 'dinput8.dll') `
-        -Content $MinimapContent
+    if (-not $WithoutDinput) {
+        Write-FixtureFile -Path (Join-Path $Path 'dinput8.dll') `
+            -Content $MinimapContent
+    }
 }
 
 function New-FixturePayload {
@@ -76,21 +79,26 @@ function Invoke-FixtureInstall {
         [int]$FailAfter
     )
 
-    $minimapName = 'dinput8.dll'
-    if (Test-Path -LiteralPath (
-            Join-Path $Game 'farever-minimap.dll')) {
-        $minimapName = 'farever-minimap.dll'
+    $minimapHashes = @{}
+    foreach ($minimapName in @(
+            'farever-minimap.dll',
+            'dinput8.dll')) {
+        $minimapPath = Join-Path $Game $minimapName
+        if (Test-Path -LiteralPath $minimapPath -PathType Leaf) {
+            $minimapHash =
+                (Get-FileHash -LiteralPath $minimapPath `
+                    -Algorithm SHA256).Hash
+            $minimapHashes[$minimapHash] = 'fixture'
+            break
+        }
     }
-    $minimapHash =
-        (Get-FileHash -LiteralPath (
-            Join-Path $Game $minimapName) -Algorithm SHA256).Hash
     $buildHash =
         (Get-FileHash -LiteralPath (
             Join-Path $Game 'hlboot.dat') -Algorithm SHA256).Hash
     & $installScript `
         -GameDirectory $Game `
         -PayloadDirectory $Payload `
-        -SupportedMinimapHashes @{ $minimapHash = 'fixture' } `
+        -SupportedMinimapHashes $minimapHashes `
         -SupportedGameBuildHashes @($buildHash) `
         -NoFolderPicker `
         -SkipRuntimeCheck `
@@ -130,8 +138,10 @@ try {
         Join-Path $game 'farever-translate.manifest.json'
     $manifest =
         Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    Assert-True ($manifest.FormatVersion -eq 2) `
-        'La instalación no creó un manifiesto v2.'
+    Assert-True ($manifest.FormatVersion -eq 3) `
+        'La instalación no creó un manifiesto v3.'
+    Assert-True ($manifest.InstallMode -eq 'ChainedMinimap') `
+        'La instalación no registró el modo encadenado.'
     Assert-True ($manifest.ProductVersion -eq '0.1.0-beta.1') `
         'La instalación registró una versión incorrecta.'
     Assert-True (
@@ -213,6 +223,112 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $manifestPath)) `
         'La desinstalación dejó el manifiesto.'
 
+    $standaloneGame = Join-Path $testRoot 'standalone-game'
+    New-FixtureGame -Path $standaloneGame -WithoutDinput
+    Invoke-FixtureInstall -Game $standaloneGame -Payload $payload1
+    $standaloneManifestPath =
+        Join-Path $standaloneGame 'farever-translate.manifest.json'
+    $standaloneManifest =
+        Get-Content -LiteralPath $standaloneManifestPath -Raw |
+        ConvertFrom-Json
+    Assert-True ($standaloneManifest.FormatVersion -eq 3) `
+        'La instalación independiente no creó un manifiesto v3.'
+    Assert-True ($standaloneManifest.InstallMode -eq 'Standalone') `
+        'La instalación independiente registró un modo incorrecto.'
+    foreach ($name in @(
+            'MinimapVersion',
+            'OriginalDinput8Sha256',
+            'ChainedFile',
+            'BackupFile')) {
+        Assert-True ($null -eq $standaloneManifest.$name) `
+            "El manifiesto independiente registró $name."
+    }
+    Assert-True (Test-Path -LiteralPath (
+        Join-Path $standaloneGame 'dinput8.dll')) `
+        'La instalación independiente no copió el proxy.'
+    Assert-True (-not (Test-Path -LiteralPath (
+        Join-Path $standaloneGame 'farever-minimap.dll'))) `
+        'La instalación independiente creó un minimapa ficticio.'
+    Assert-True (-not (Test-Path -LiteralPath (
+        Join-Path $standaloneGame 'FareverTranslate.Backup'))) `
+        'La instalación independiente creó un respaldo ficticio.'
+
+    $standaloneHost =
+        Join-Path $standaloneGame 'FareverTranslate.Host.exe'
+    Write-FixtureFile -Path $standaloneHost `
+        -Content 'tampered standalone fixture'
+    $standaloneTamperRejected = $false
+    try {
+        & $uninstallScript `
+            -GameDirectory $standaloneGame -NoFolderPicker
+    }
+    catch {
+        $standaloneTamperRejected = $true
+    }
+    Assert-True $standaloneTamperRejected `
+        'La desinstalación independiente aceptó un archivo manipulado.'
+    Assert-True (Test-Path -LiteralPath (
+        Join-Path $standaloneGame 'dinput8.dll')) `
+        'El rechazo independiente eliminó el proxy.'
+    Copy-Item -LiteralPath (
+        Join-Path $payload1 'FareverTranslate.Host.exe') `
+        -Destination $standaloneHost -Force
+
+    Invoke-FixtureInstall -Game $standaloneGame -Payload $payload2
+    $standaloneManifest =
+        Get-Content -LiteralPath $standaloneManifestPath -Raw |
+        ConvertFrom-Json
+    Assert-True (
+        $standaloneManifest.ProductVersion -eq '0.1.0-beta.2') `
+        'La actualización independiente no registró la versión nueva.'
+    Assert-True ($standaloneManifest.InstallMode -eq 'Standalone') `
+        'La actualización independiente cambió de modo.'
+    $standaloneBeforeRollback = @{}
+    foreach ($file in $standaloneManifest.Files) {
+        $standaloneBeforeRollback[[string]$file.Name] =
+            (Get-FileHash -LiteralPath (
+                Join-Path $standaloneGame ([string]$file.Name)) `
+                -Algorithm SHA256).Hash
+    }
+
+    $standaloneRollbackTriggered = $false
+    try {
+        Invoke-FixtureInstall -Game $standaloneGame `
+            -Payload $payload3 -FailAfter 1
+    }
+    catch {
+        $standaloneRollbackTriggered = $true
+    }
+    Assert-True $standaloneRollbackTriggered `
+        'La prueba independiente no activó el rollback.'
+    $standaloneManifest =
+        Get-Content -LiteralPath $standaloneManifestPath -Raw |
+        ConvertFrom-Json
+    Assert-True (
+        $standaloneManifest.ProductVersion -eq '0.1.0-beta.2') `
+        'El rollback independiente no restauró el manifiesto.'
+    foreach ($name in $standaloneBeforeRollback.Keys) {
+        Assert-True (
+            (Get-FileHash -LiteralPath (
+                Join-Path $standaloneGame $name) `
+                -Algorithm SHA256).Hash -eq
+                $standaloneBeforeRollback[$name]) `
+            "El rollback independiente no restauró $name."
+    }
+
+    & $uninstallScript `
+        -GameDirectory $standaloneGame -NoFolderPicker
+    foreach ($name in @(
+            'dinput8.dll',
+            'FareverTranslate.Host.exe',
+            'farever-translate.manifest.json',
+            'farever-minimap.dll',
+            'FareverTranslate.Backup')) {
+        Assert-True (-not (Test-Path -LiteralPath (
+            Join-Path $standaloneGame $name))) `
+            "La desinstalación independiente dejó $name."
+    }
+
     $legacyGame = Join-Path $testRoot 'legacy-game'
     New-FixtureGame -Path $legacyGame
     Invoke-FixtureInstall -Game $legacyGame -Payload $payload1
@@ -257,8 +373,10 @@ try {
     $migrated =
         Get-Content -LiteralPath $legacyManifestPath -Raw |
         ConvertFrom-Json
-    Assert-True ($migrated.FormatVersion -eq 2) `
+    Assert-True ($migrated.FormatVersion -eq 3) `
         'La actualización no migró el manifiesto v1.'
+    Assert-True ($migrated.InstallMode -eq 'ChainedMinimap') `
+        'La migración v1 no conservó el modo encadenado.'
     Assert-True ($migrated.ProductVersion -eq '0.1.0-beta.2') `
         'La migración registró una versión incorrecta.'
     foreach ($name in @(
@@ -271,6 +389,30 @@ try {
             "La migración no eliminó el archivo obsoleto $name."
     }
     & $uninstallScript -GameDirectory $legacyGame -NoFolderPicker
+
+    $legacyV2Game = Join-Path $testRoot 'legacy-v2-game'
+    New-FixtureGame -Path $legacyV2Game
+    Invoke-FixtureInstall -Game $legacyV2Game -Payload $payload1
+    $legacyV2ManifestPath =
+        Join-Path $legacyV2Game 'farever-translate.manifest.json'
+    $legacyV2 =
+        Get-Content -LiteralPath $legacyV2ManifestPath -Raw |
+        ConvertFrom-Json
+    $legacyV2.FormatVersion = 2
+    $legacyV2.PSObject.Properties.Remove('InstallMode')
+    [IO.File]::WriteAllText(
+        $legacyV2ManifestPath,
+        ($legacyV2 | ConvertTo-Json -Depth 5),
+        [Text.UTF8Encoding]::new($false))
+    Invoke-FixtureInstall -Game $legacyV2Game -Payload $payload2
+    $migratedV2 =
+        Get-Content -LiteralPath $legacyV2ManifestPath -Raw |
+        ConvertFrom-Json
+    Assert-True ($migratedV2.FormatVersion -eq 3) `
+        'La actualización no migró el manifiesto v2.'
+    Assert-True ($migratedV2.InstallMode -eq 'ChainedMinimap') `
+        'La migración v2 no conservó el modo encadenado.'
+    & $uninstallScript -GameDirectory $legacyV2Game -NoFolderPicker
 
     $guardGame = Join-Path $testRoot 'manifest-guard'
     New-FixtureGame -Path $guardGame
@@ -346,8 +488,19 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (
         Join-Path $unknownGame 'farever-translate.manifest.json'))) `
         'El rechazo dejó un manifiesto.'
+    Assert-True (-not (Test-Path -LiteralPath (
+        Join-Path $unknownGame 'FareverTranslate.Host.exe'))) `
+        'El rechazo dejó el host.'
+    Assert-True (-not (Test-Path -LiteralPath (
+        Join-Path $unknownGame 'farever-minimap.dll'))) `
+        'El rechazo movió el DLL desconocido.'
+    Assert-True (-not (Test-Path -LiteralPath (
+        Join-Path $unknownGame 'FareverTranslate.Backup'))) `
+        'El rechazo creó un respaldo.'
 
-    Write-Host 'Instalación, actualización y desinstalación: OK'
+    Write-Host (
+        'Instalación independiente/encadenada, actualización y ' +
+        'desinstalación: OK')
 }
 finally {
     $artifactsPath = Join-Path $root 'artifacts'
