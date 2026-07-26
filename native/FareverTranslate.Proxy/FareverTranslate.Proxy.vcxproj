@@ -68,6 +68,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;DIRECTINPUT_VERSION=0x0800;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -80,6 +81,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Proxy.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Proxy.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Exports.def" />

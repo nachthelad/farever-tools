@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Reflection;
 using System.Threading;
 using System.Windows;
 using FareverTranslate.Core.Configuration;
@@ -19,6 +20,22 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (e.Args.Length == 1
+            && string.Equals(
+                e.Args[0],
+                "--version",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            string version = typeof(App).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion
+                ?? typeof(App).Assembly.GetName().Version?.ToString()
+                ?? "desconocida";
+            Console.WriteLine(version);
+            Shutdown(0);
+            return;
+        }
 
         if (!HostArguments.TryParse(e.Args, out HostArguments? arguments)
             || arguments is null)

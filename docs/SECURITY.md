@@ -16,6 +16,7 @@
 - El instalador no distribuye el minimapa: trabaja sobre la copia existente y
   registra hashes para restaurarla.
 
-El MVP es personal, para Windows x64 y el build soportado. No debe distribuirse
-sin revisar las reglas vigentes del juego y sin repetir las pruebas de
-compatibilidad.
+La beta pública es para uso personal en Windows x64 y únicamente en builds
+permitidos por hash. Es un proyecto comunitario no afiliado a Shiro Games y no
+garantiza que Farever autorice su uso. Cada actualización del juego o del
+minimapa requiere repetir las pruebas antes de ampliar la lista compatible.

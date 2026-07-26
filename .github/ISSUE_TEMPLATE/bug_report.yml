@@ -1,0 +1,59 @@
+name: Reportar un problema
+description: Informá un fallo reproducible de Farever Translate.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No pegues API keys, texto del chat, cachés ni archivos DPAPI.
+  - type: input
+    id: translator-version
+    attributes:
+      label: Versión de Farever Translate
+      placeholder: 0.1.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: game-build
+    attributes:
+      label: SHA-256 de hlboot.dat
+      description: El diagnóstico o instalador muestra este valor.
+    validations:
+      required: true
+  - type: input
+    id: minimap
+    attributes:
+      label: Versión y SHA-256 del minimapa
+      placeholder: v1.2.4 — 2C22ECE5...
+    validations:
+      required: true
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options:
+        - Windows 11 x64
+        - Windows 10 x64
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducirlo
+      description: Describí el resultado esperado y el observado.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs técnicos revisados
+      description: Pegá solo las líneas técnicas relevantes después de comprobar que no contienen datos privados.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacidad
+      options:
+        - label: Confirmo que no incluí credenciales ni conversaciones.
+          required: true

@@ -1,100 +1,154 @@
 # Farever Translate
 
-Traductor de chat local para Farever. El proyecto conserva el minimapa/DPS
-existente, lee el chat con acceso de solo lectura y muestra traducciones al
-español bajo demanda.
+[![CI](https://github.com/nachthelad/farever-translate/actions/workflows/ci.yml/badge.svg)](https://github.com/nachthelad/farever-translate/actions/workflows/ci.yml)
+[![MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 
-El paquete tiene dos componentes:
+Traductor manual de chat para Farever. Lee el historial del juego con acceso
+de solo lectura, muestra los mensajes recientes en un panel externo y traduce
+al español únicamente la línea que elegís.
 
-- `dinput8.dll`: proxy nativo mínimo que encadena el mod instalado como
-  `farever-minimap.dll` y arranca el host.
-- `FareverTranslate.Host.exe`: lector HashLink externo, panel WPF y cliente de
-  Google Cloud Translation.
+> [!WARNING]
+> Proyecto comunitario gratuito y no afiliado a Shiro Games. Es una
+> herramienta no oficial, para uso personal y bajo responsabilidad del
+> usuario. No existe garantía de aprobación o compatibilidad futura con
+> Farever.
 
-El proyecto no escribe memoria del juego, no automatiza entradas, no traduce
-mensajes sin un clic explícito y no redistribuye el DLL del minimapa.
+![Panel de Farever Translate con conversación sintética](docs/images/farever-translate-overlay.png)
 
-La configuración y los datos protegidos se guardan en
-`%LOCALAPPDATA%\FareverTranslate`.
+La captura usa nombres y mensajes completamente sintéticos.
 
-## Estado
+## Qué hace
 
-MVP implementado para Farever x64, build de `hlboot.dat`
-`7C3CA4DD765B50972B0EB524F82F9943A1D24D9EA52CBBA97C7F87D5D840E7A0`.
+- Conserva y encadena el minimapa/DPS ya instalado por el usuario.
+- Lee Farever mediante `PROCESS_VM_READ`; no escribe memoria ni inyecta código.
+- Nunca automatiza teclas, movimientos o mensajes.
+- Envía a Google solamente la línea cuyo botón `T` se pulsa.
+- Cifra la API key y el caché con DPAPI para el usuario actual de Windows.
+- Oculta el panel fuera del mundo, al minimizar y al cambiar de aplicación.
+- Deja pasar el mouse por defecto para no cortar el movimiento de cámara.
 
-## Compilar
+## Compatibilidad de la beta
 
-Requisitos:
+| Componente | Versión admitida |
+| --- | --- |
+| Farever | Windows x64, `hlboot.dat` SHA-256 `7C3CA4DD…E7A0` |
+| Farever Minimap & DPS | v1.2.3 o v1.2.4, identificadas por SHA-256 |
+| Windows | Windows 10/11 x64 |
+| Pantalla | Ventana o ventana sin bordes |
+| Runtime | .NET 8 Desktop Runtime x64 |
 
-- .NET 8 SDK y Desktop Runtime.
-- Visual Studio Build Tools 2022 con C++ x64.
-
-Desde PowerShell:
-
-```powershell
-.\scripts\Build-Release.ps1
-```
-
-El paquete queda en `artifacts\package`.
+Los hashes desconocidos se rechazan. Farever está en Early Access y una
+actualización puede requerir una nueva versión del traductor.
 
 ## Instalar
 
-Farever debe estar cerrado y el minimapa oficial compatible ya debe estar
-instalado como `dinput8.dll`.
+1. Instalá primero una versión compatible de
+   [Farever Minimap & DPS](https://github.com/ramisotti13-eng/farever-minimap/releases).
+2. Descargá `FareverTranslate-v0.1.0-beta.1-win-x64.zip` desde
+   [GitHub Releases](https://github.com/nachthelad/farever-translate/releases),
+   extraelo en una carpeta aparte y no directamente sobre Farever.
+3. Cerrá Farever y ejecutá `Instalar.cmd`.
 
-```powershell
-.\artifacts\package\Install-FareverTranslate.ps1 `
-  -GameDirectory 'E:\SteamLibrary\steamapps\common\Farever'
-```
+El instalador busca Farever en las bibliotecas de Steam. Si no lo encuentra,
+permite seleccionar la carpeta que contiene `Farever.exe`. Antes de modificar
+nada verifica:
 
-El script verifica el hash conocido del minimapa, crea un respaldo, lo mueve a
-`farever-minimap.dll` e instala el proxy y el host. No descarga ni distribuye
-el DLL oficial.
+- [.NET 8 Desktop Runtime x64](https://dotnet.microsoft.com/en-us/download/dotnet/8.0/runtime);
+- el build de Farever;
+- la versión exacta del minimapa;
+- que Farever esté cerrado.
 
-Para desinstalar:
+El minimapa se respalda byte por byte y se renombra como
+`farever-minimap.dll`. El proyecto no lo descarga ni lo redistribuye.
 
-```powershell
-.\artifacts\package\Uninstall-FareverTranslate.ps1 `
-  -GameDirectory 'E:\SteamLibrary\steamapps\common\Farever'
-```
+### Actualizar
 
-La desinstalación aborta si algún archivo fue modificado y solo restaura el
-original cuando todos los hashes coinciden.
+Descargá la nueva release, extraela en otra carpeta y ejecutá su
+`Instalar.cmd`. La actualización verifica la instalación existente, prepara
+los archivos nuevos y vuelve automáticamente a la versión anterior si algo
+falla.
+
+### Desinstalar
+
+Cerrá Farever y ejecutá `Desinstalar.cmd` desde la carpeta extraída. Se
+verifican todos los hashes antes de restaurar el minimapa original. Si algún
+archivo fue modificado, la operación se detiene para no perder el respaldo.
 
 ## Usar
 
-- Abrir Farever en ventana o ventana sin bordes.
-- Pulsar **Clave** y guardar una API key restringida a Cloud Translation API.
-- Pulsar **Traducir** en una línea; no hay traducción automática.
-- El panel aparece únicamente dentro del mundo y mientras Farever está en
-  primer plano. Se oculta en cargas, minimizado y al cambiar de aplicación.
-- El panel deja pasar el mouse hacia Farever por defecto. Pulsar y soltar
-  `Alt` sola habilita sus controles; pulsarla nuevamente devuelve el mouse al
-  juego.
-- Si el historial deja de producir mensajes, el lector refresca sus
-  referencias y vuelve a buscar el chat automáticamente con espera progresiva.
-- Después de habilitar la interacción con `Alt`, usar **Calibrar** para
-  arrastrar o redimensionar el panel junto al chat. El tamaño y la posición
-  quedan guardados.
-- Alternar el panel con `F6` mientras Farever está en primer plano.
+- `F6`: mostrar u ocultar el panel mientras Farever está en primer plano.
+- `Alt` sola: habilitar botones, scroll, arrastre y resize.
+- `Alt` nuevamente: devolver inmediatamente el mouse al juego.
+- `T`: traducir esa línea al español.
+- `×`: descartar una línea que no interesa.
+- **Calibrar**: mover o redimensionar el panel.
+- **Clave**: guardar o borrar la API key de Google Cloud Translation.
 
-Consulta [Google Cloud](docs/GOOGLE_CLOUD.md), los
-[límites de seguridad](docs/SECURITY.md) y el
-[diseño base](docs/superpowers/specs/2026-07-25-farever-chat-translator-design.md),
-además del
-[diseño del panel compacto](docs/superpowers/specs/2026-07-25-game-bound-compact-overlay-design.md).
+Las combinaciones `Alt+Tab`, `Alt+F4`, `Alt+Enter`, `Alt+Shift` y `AltGr` no
+alternan la interacción del traductor.
 
-## Pruebas
+## Configurar Google Cloud
+
+Cada usuario aporta su propia API key:
+
+1. Crear o seleccionar un proyecto en Google Cloud.
+2. Activar **Cloud Translation API**.
+3. Crear una API key restringida únicamente a esa API.
+4. Configurar una cuota y alertas de presupuesto.
+5. Abrir **Clave** en el panel y pegarla.
+
+Google puede modificar precios, créditos y cuotas. Consultá la
+[documentación de configuración](docs/GOOGLE_CLOUD.md) y la
+[tabla oficial de precios](https://cloud.google.com/translate/pricing).
+
+## Privacidad y seguridad
+
+- Los mensajes y credenciales nunca se escriben en logs.
+- La API key y el caché se guardan bajo
+  `%LOCALAPPDATA%\FareverTranslate`, cifrados para el usuario actual.
+- No hay telemetría ni servidor propio.
+- Los binarios de esta beta no están firmados. Cada release publica
+  `SHA256SUMS.txt` para verificar la descarga.
+- La MIT cubre solamente el código de este repositorio. Farever, sus marcas y
+  el minimapa pertenecen a sus respectivos titulares.
+
+Consultá los [límites técnicos](docs/SECURITY.md) y la
+[política de seguridad](SECURITY.md).
+
+## Solución de problemas
+
+- **Falta .NET 8 Desktop Runtime x64:** instalá el Desktop Runtime, no solo el
+  runtime de consola.
+- **No se encontró Farever:** seleccioná la carpeta que contiene
+  `Farever.exe`.
+- **Minimapa no compatible:** reinstalá una versión indicada en la tabla; no
+  renombres otro mod como `dinput8.dll`.
+- **Versión de Farever no compatible:** no fuerces la instalación. Adjuntá el
+  hash mostrado en un Issue.
+- **El panel no aparece:** entrá al mundo con un personaje y pulsá `F6`.
+- **El mouse no responde al panel:** pulsá y soltá `Alt` sola.
+
+No publiques API keys, texto del chat ni archivos de caché al pedir ayuda.
+
+## Compilar y probar
+
+Requisitos de desarrollo:
+
+- .NET 8 SDK;
+- Visual Studio Build Tools 2022 con C++ x64;
+- PowerShell 7 recomendado.
 
 ```powershell
 .\scripts\Test-All.ps1
+.\scripts\Build-Package.ps1
 ```
 
-La suite cubre objetos y registros virtuales HashLink sintéticos (Unicode,
-duplicados, punteros inválidos y reconexión), build desconocido, respuestas de
-Google, DPAPI, caché, DPI, los cinco exports y el ciclo
-instalación/restauración.
+El ZIP y su checksum quedan en `artifacts\release`.
 
-Quedan como pruebas manuales previas al uso cotidiano: validar el minimapa/DPS
-en el juego, comprobar el ajuste visual del panel y completar una sesión de
-una hora con reconexiones y cambios de zona.
+## Licencia y atribución
+
+Farever Translate se publica bajo [MIT](LICENSE).
+
+“Farever” y sus marcas pertenecen a Shiro Games. Este proyecto no contiene
+archivos del juego ni código, DLL, imágenes o datos del proyecto
+Farever Minimap & DPS.

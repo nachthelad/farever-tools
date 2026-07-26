@@ -1,0 +1,42 @@
+FAREVER TRANSLATE
+=================
+
+Proyecto comunitario gratuito y no afiliado a Shiro Games.
+Uso personal y bajo responsabilidad del usuario.
+
+IMPORTANTE
+----------
+
+- No extraigas los archivos directamente sobre la carpeta de Farever.
+- Farever debe estar cerrado al instalar, actualizar o desinstalar.
+- Primero instalá el minimapa compatible desde su repositorio:
+  https://github.com/ramisotti13-eng/farever-minimap/releases
+- Necesitás .NET 8 Desktop Runtime x64:
+  https://dotnet.microsoft.com/en-us/download/dotnet/8.0/runtime
+
+INSTALAR O ACTUALIZAR
+---------------------
+
+1. Extraé todo este ZIP en una carpeta aparte.
+2. Hacé doble clic en Instalar.cmd.
+3. Si Farever no se detecta, seleccioná la carpeta que contiene Farever.exe.
+
+USAR
+----
+
+- F6 muestra u oculta el panel.
+- Alt sola habilita los controles del panel.
+- Alt nuevamente devuelve el mouse al juego.
+- Configurá tu propia API key de Google Cloud Translation desde "Clave".
+- Solo se envía a Google la línea que decidís traducir.
+
+DESINSTALAR
+-----------
+
+Conservá esta carpeta extraída. Para restaurar el minimapa original, cerrá
+Farever y ejecutá Desinstalar.cmd.
+
+AYUDA Y CÓDIGO FUENTE
+---------------------
+
+https://github.com/nachthelad/farever-translate

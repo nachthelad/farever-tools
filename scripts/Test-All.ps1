@@ -53,4 +53,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 & (Join-Path $PSScriptRoot 'Test-InstallRoundTrip.ps1')
+& (Join-Path $PSScriptRoot 'Build-Package.ps1')
+& (Join-Path $PSScriptRoot 'Test-Package.ps1')
+& (Join-Path $PSScriptRoot 'Test-RepositoryHygiene.ps1')
 Write-Host 'Suite completa: OK'

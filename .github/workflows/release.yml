@@ -1,0 +1,54 @@
+name: Release draft
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Validate tag
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content Directory.Build.props -Raw
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "El tag $env:GITHUB_REF_NAME no coincide con v$version."
+          }
+
+      - name: Test and package
+        shell: pwsh
+        run: ./scripts/Test-All.ps1
+
+      - name: Create draft prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [xml]$props = Get-Content Directory.Build.props -Raw
+          $version = [string]$props.Project.PropertyGroup.Version
+          $name = "FareverTranslate-v$version-win-x64"
+          gh release create $env:GITHUB_REF_NAME `
+            "artifacts/release/$name.zip" `
+            "artifacts/release/SHA256SUMS.txt" `
+            --draft `
+            --prerelease `
+            --verify-tag `
+            --title "Farever Translate $version" `
+            --notes-file "packaging/RELEASE_NOTES.md"
